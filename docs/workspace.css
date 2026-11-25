@@ -1,0 +1,269 @@
+.workspace {
+  --accent: #076960;
+  --ink: #152c3c;
+  --muted: #465e6b;
+  --line: #d4e0e5;
+  --surface: #f5f8f9;
+  --selected: #dff1ee;
+  display: grid;
+  grid-template-columns: 15.5rem minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  background: var(--surface);
+}
+
+.workspace-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem 1.5rem;
+  background: #13323c;
+  color: #fff;
+}
+
+.workspace-brand,
+.workspace-account {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-width: 0;
+}
+
+.workspace-brand {
+  font-size: 1.1rem;
+  font-weight: 750;
+}
+
+.workspace-account {
+  max-width: 50%;
+  font-size: .875rem;
+}
+
+#account {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace button {
+  padding: .5rem .75rem;
+  min-height: 2.5rem;
+  border: 1px solid var(--line);
+  border-radius: .4rem;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace button:hover {
+  background: var(--selected);
+}
+
+.workspace button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.workspace-header button {
+  flex: none;
+  border-color: #72949b;
+  background: transparent;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.workspace-header button:hover {
+  background: #254851;
+}
+
+#menu-toggle {
+  display: none;
+}
+
+.sidebar {
+  overflow: auto;
+  padding: 1rem .75rem;
+  border-right: 1px solid var(--line);
+  background: #fff;
+}
+
+#module-nav,
+.submenu {
+  display: grid;
+  gap: .125rem;
+}
+
+#module-nav :is(button, summary) {
+  min-height: 2.625rem;
+  width: 100%;
+  padding: .625rem .75rem;
+  border: 0;
+  border-radius: .4rem;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+
+#module-nav > button,
+#module-nav summary {
+  font-weight: 700;
+}
+
+#module-nav summary:hover {
+  background: var(--surface);
+}
+
+.submenu {
+  margin-left: .875rem;
+  padding-left: .375rem;
+  border-left: 1px solid var(--line);
+}
+
+#module-nav button[aria-current="page"] {
+  background: var(--selected);
+  color: #075750;
+  font-weight: 750;
+}
+
+.workspace-main {
+  overflow: auto;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  max-width: 66rem;
+  margin: 0 auto .875rem;
+}
+
+.workspace-location {
+  margin: 0;
+  color: var(--muted);
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.workspace-toolbar button {
+  flex: none;
+  font-size: .875rem;
+}
+
+#workspace-error {
+  max-width: 66rem;
+  margin: 0 auto .875rem;
+  color: #a12628;
+}
+
+.module-panel {
+  max-width: 66rem;
+  margin: auto;
+  padding: clamp(1rem, 4vw, 2.5rem);
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: #fff;
+}
+
+.module-panel h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.625rem, 5vw, 2.25rem);
+  line-height: 1.2;
+}
+
+.module-description {
+  max-width: 42rem;
+  margin: .75rem 0 1.5rem;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.module-details {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  background: var(--surface);
+}
+
+.module-details h2,
+.module-links h2 {
+  margin: 0 0 .75rem;
+  font-size: 1rem;
+}
+
+.module-details ul {
+  display: grid;
+  gap: .5rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.55;
+}
+
+.module-links {
+  margin-top: 1.5rem;
+}
+
+.module-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: .625rem;
+}
+
+.module-shortcuts button {
+  text-align: left;
+  font-weight: 650;
+}
+
+@media (max-width: 47rem) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-header {
+    padding: .625rem .75rem;
+  }
+
+  .workspace-brand {
+    font-size: .875rem;
+  }
+
+  .workspace-account {
+    gap: .375rem;
+  }
+
+  #menu-toggle {
+    display: inline-block;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .workspace.menu-open {
+    grid-template-rows: auto minmax(0, min(50dvh, 24rem)) minmax(0, 1fr);
+  }
+
+  .workspace.menu-open .sidebar {
+    display: block;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 25rem) {
+  .workspace-header {
+    flex-wrap: wrap;
+  }
+
+  .workspace-account {
+    max-width: 100%;
+  }
+}
