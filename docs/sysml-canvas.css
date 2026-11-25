@@ -1,0 +1,240 @@
+.sysml-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 1.3em;
+  height: 1.3em;
+  place-items: center;
+  border-radius: .25rem;
+  color: inherit;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.sysml-icon[data-icon="element"] {
+  background: #deefeb;
+  color: #17675d;
+}
+
+.sysml-icon[data-icon="port"] {
+  background: #e1ecf9;
+  color: #235f9b;
+}
+
+.sysml-icon[data-icon="function"] {
+  background: #f5eacb;
+  color: #755013;
+  font-style: italic;
+}
+
+.sysml-icon[data-icon="failure"] {
+  padding-top: .2em;
+  background: #ad3c33;
+  color: #fff;
+  clip-path: polygon(50% 0, 100% 94%, 0 94%);
+}
+
+.sysml-icon[data-icon="malfunction"] {
+  background: #f0e4f8;
+  color: #6d347f;
+}
+
+.sysml-icon[data-icon="connector"] {
+  background: #e6edef;
+  color: #436571;
+}
+
+.sysml-icon[data-icon="model"] {
+  background: #e1eeed;
+  color: #296761;
+}
+
+.sysml-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 23rem;
+  overflow: auto;
+  background: #f6faf9;
+  color: #3b6064;
+  isolation: isolate;
+}
+
+.sysml-canvas:focus-visible {
+  outline: 2px solid #097c6f;
+  outline-offset: -2px;
+}
+
+.sysml-canvas-surface {
+  position: relative;
+  display: grid;
+  min-width: 100%;
+  min-height: 100%;
+  place-items: center;
+  background-image: radial-gradient(circle, #c5d6d6 1px, transparent 1.4px);
+  background-size: 19px 19px;
+}
+
+.sysml-canvas.is-drop-target .sysml-canvas-surface {
+  background-color: #eaf5f2;
+}
+
+.sysml-canvas-empty {
+  max-width: min(20rem, 90%);
+  margin: 0;
+  padding: .75rem 1rem;
+  border: 1px dashed #9db9b9;
+  border-radius: .55rem;
+  background: #f8fcfb;
+  color: #3e6064;
+  font-size: .875rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.sysml-canvas-lines,
+.sysml-canvas-labels,
+.sysml-canvas-cards {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sysml-canvas-lines,
+.sysml-canvas-labels {
+  overflow: visible;
+}
+
+.sysml-canvas-cards {
+  z-index: 1;
+}
+
+.sysml-canvas-labels {
+  z-index: 2;
+}
+
+.sysml-canvas-edge {
+  cursor: pointer;
+}
+
+.sysml-canvas-line,
+.sysml-canvas-line-hit {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.sysml-canvas-line {
+  stroke-width: 2;
+}
+
+.sysml-canvas-line-hit {
+  stroke: transparent;
+  stroke-width: 17;
+  pointer-events: stroke;
+}
+
+.sysml-canvas-edge:is(:hover, :focus-visible, .is-selected) .sysml-canvas-line {
+  stroke-width: 3.5;
+}
+
+.sysml-canvas-edge:is(:focus-visible, .is-selected) .sysml-canvas-line {
+  filter: drop-shadow(0 0 3px #0b766c66);
+}
+
+.sysml-canvas-edge:focus-visible {
+  outline: none;
+}
+
+.sysml-canvas-edge-label {
+  fill: #2f4f57;
+  stroke: #f6faf9;
+  stroke-width: 5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  font-size: 12px;
+  font-weight: 650;
+  paint-order: stroke;
+  text-anchor: middle;
+  user-select: none;
+  cursor: pointer;
+  pointer-events: visiblePainted;
+}
+
+.workspace .sysml-canvas-card,
+.workspace .sysml-canvas-card:hover {
+  position: absolute;
+  display: flex;
+  min-height: 0;
+  align-items: flex-start;
+  gap: .5rem;
+  padding: .48rem .52rem;
+  overflow: hidden;
+  border: 1.5px solid var(--node-stroke);
+  border-radius: .5rem;
+  background: var(--node-fill);
+  color: var(--node-ink, #173b45);
+  box-shadow: 0 2px 3px #163f431a;
+  cursor: grab;
+  pointer-events: auto;
+  text-align: start;
+  touch-action: none;
+  user-select: none;
+}
+
+.sysml-canvas-card[data-node-type="port"] {
+  border-radius: .82rem;
+}
+
+.workspace .sysml-canvas-card:is(:hover, .is-selected, :focus-visible) {
+  z-index: 1;
+  outline: 2px solid #118677;
+  outline-offset: 2px;
+}
+
+.workspace .sysml-canvas-card.is-dragging {
+  z-index: 2;
+  cursor: grabbing;
+}
+
+.workspace .sysml-canvas.is-linking .sysml-canvas-card {
+  cursor: crosshair;
+}
+
+.workspace .sysml-canvas-card.is-connect-from {
+  outline: 2px dashed #087e74;
+  outline-offset: 3px;
+}
+
+.sysml-canvas-card-info {
+  display: grid;
+  min-width: 0;
+  gap: .22rem;
+}
+
+.sysml-canvas-card-heading {
+  overflow: hidden;
+  font-size: .835rem;
+  font-weight: 750;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sysml-canvas-card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: .76rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+@media (max-width: 47rem) {
+  .sysml-canvas {
+    min-height: 20rem;
+  }
+}

@@ -3,7 +3,6 @@ const workspaceMenu = [
     id: 'projects',
     title: '프로젝트',
     description: '시스템 모델과 안전분석 문서를 프로젝트 단위로 관리하는 작업공간입니다.',
-    features: ['프로젝트 생성과 목록에서 열기', '마지막으로 저장한 문서와 작업 상태 복원'],
     links: ['sysml', 'hara', 'fmea', 'fmeca', 'fmeda', 'fta']
   },
   {
@@ -12,9 +11,7 @@ const workspaceMenu = [
       {
         id: 'sysml',
         title: 'SysML',
-        description: '시스템을 구성하는 블록과 파트, 포트, 연결 관계를 정의합니다.',
-        features: ['블록 정의도(BDD)와 내부 블록도(IBD) 편집', '파트와 고장 모드를 안전분석 문서에 연결'],
-        links: ['requirements', 'fmea', 'fmeda']
+        description: ''
       }
     ]
   },
@@ -168,6 +165,7 @@ function createWorkspace(root) {
   const history = [];
   let activeId = null;
   const moduleContent = new Map();
+  const sysmlWorkspace = createSysmlWorkspace({ navigate, mount: root, activeModule: () => activeId });
 
   function element(tag, text, className) {
     const result = document.createElement(tag);
@@ -186,6 +184,7 @@ function createWorkspace(root) {
   function addModule(module, container, groupTitle, group) {
     const button = moduleButton(module);
     container.append(button);
+    if (module.id === 'sysml') container.append(sysmlWorkspace.navigation);
     modules.set(module.id, { ...module, groupTitle, group, button });
   }
 
@@ -211,6 +210,12 @@ function createWorkspace(root) {
 
   function render(moduleId) {
     const module = modules.get(moduleId);
+    if (moduleId === activeId) {
+      setMenuOpen(false);
+      sysmlWorkspace.render(moduleId, false);
+      return;
+    }
+    if (activeId === 'sysml') sysmlWorkspace.leaveEditor();
     modules.get(activeId)?.button.removeAttribute('aria-current');
     activeId = moduleId;
     module.button.setAttribute('aria-current', 'page');
@@ -218,10 +223,14 @@ function createWorkspace(root) {
     location.textContent = module.groupTitle ? module.groupTitle + ' / ' + module.title : '작업공간';
     title.textContent = module.title;
     description.textContent = module.description;
+    description.hidden = !module.description;
     document.title = module.title + ' | 안전분석 공업 수학';
+    root.classList.toggle('workspace-sysml', moduleId === 'sysml');
 
     content.replaceChildren();
-    if (module.createContent) {
+    if (moduleId === 'projects' || moduleId === 'sysml') {
+      content.append(sysmlWorkspace[moduleId]);
+    } else if (module.createContent) {
       if (!moduleContent.has(moduleId)) moduleContent.set(moduleId, module.createContent());
       content.append(moduleContent.get(moduleId));
     }
@@ -242,7 +251,9 @@ function createWorkspace(root) {
     }
 
     back.disabled = history.length === 0;
+    back.title = moduleId === 'sysml' ? '이전 메뉴로 이동' : '뒤로가기 (Ctrl+Z)';
     setMenuOpen(false);
+    sysmlWorkspace.render(moduleId, true);
     title.focus();
   }
 
@@ -260,23 +271,38 @@ function createWorkspace(root) {
   });
   back.addEventListener('click', goBack);
   root.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented) return;
+    if (sysmlWorkspace.handleKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Escape' && menuToggle.getAttribute('aria-expanded') === 'true') {
       setMenuOpen(false);
       menuToggle.focus();
     }
-    if (event.defaultPrevented || !event.ctrlKey || event.shiftKey || event.altKey ||
+    if (activeId === 'sysml' || !event.ctrlKey || event.shiftKey || event.altKey ||
         event.key.toLowerCase() !== 'z' || !history.length ||
         event.target.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return;
     event.preventDefault();
     goBack();
   });
 
+  function reset() {
+    sysmlWorkspace.stop();
+    history.length = 0;
+    moduleContent.clear();
+    modules.get(activeId)?.button.removeAttribute('aria-current');
+    activeId = null;
+    for (const { group, expanded } of groups) group.open = expanded;
+    render('projects');
+  }
+
   return {
-    reset() {
-      history.length = 0;
-      moduleContent.clear();
-      for (const { group, expanded } of groups) group.open = expanded;
-      render('projects');
-    }
+    start(client, userId) {
+      reset();
+      void sysmlWorkspace.start(client, userId);
+    },
+    stop: reset,
+    beforeLogout: sysmlWorkspace.beforeLogout
   };
 }

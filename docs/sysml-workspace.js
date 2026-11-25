@@ -1,0 +1,514 @@
+function createSysmlWorkspace({ navigate, mount, activeModule }) {
+  const { limits, modelKinds } = SysmlModel;
+  const navigation = sysmlElement('div', 'sysml-navigation');
+  const modelLinks = sysmlElement('div', 'sysml-model-links');
+  modelLinks.setAttribute('aria-label', 'SysML 모델');
+  const newModelLink = sysmlButton('SysML 모델 추가', requestNewModel, { icon: 'plus', className: 'sysml-new-model' });
+  navigation.append(newModelLink, modelLinks);
+  const projects = sysmlElement('div', 'sysml-projects');
+  const projectList = sysmlElement('div', 'sysml-project-list');
+  const projectPlaceholder = sysmlElement('p', 'sysml-prompt');
+  const projectHeading = sysmlElement('h2', '', '내 프로젝트');
+  const dashboard = sysmlElement('div', 'sysml-dashboard');
+  dashboard.append(projectHeading, projectList, projectPlaceholder);
+  const sysml = sysmlElement('div', 'sysml-workspace');
+  const empty = sysmlElement('div', 'sysml-empty');
+  const emptyTitle = sysmlElement('h2');
+  const emptyMessage = sysmlElement('p');
+  const emptyAction = sysmlButton('SysML 모델 추가', requestNewModel, { icon: 'plus', className: 'sysml-primary' });
+  empty.append(createSysmlIcon('model'), emptyTitle, emptyMessage, emptyAction);
+  const file = sysmlElement('input');
+  file.type = 'file';
+  file.accept = '.json,application/json';
+  file.hidden = true;
+  const dialog = sysmlElement('dialog', 'sysml-dialog');
+  mount.append(dialog, file);
+
+  let store = null;
+  let history = null;
+  let remoteStamp = '';
+  let modelNavigationStamp = '';
+  let projectListStamp = '';
+  let records = [];
+  let pendingSave = null;
+  let switching = false;
+  let projectListLoading = false;
+  let projectListError = '';
+  let statusMessage = '';
+  let conflictDraft = null;
+  let focusBeforeDialog = null;
+  let dialogAction = null;
+  let draftAvailable = true;
+
+  const editor = createSysmlEditor({ edit: editModel, renameModel: () => showModelDialog(model()), removeModel });
+  const projectBar = createBar(true);
+  const editorBar = createBar(false);
+  projects.append(projectBar.element, dashboard);
+  sysml.append(editorBar.element, empty, editor.element);
+
+  function createBar(isProjectPage) {
+    const element = sysmlElement('section', 'sysml-project-bar');
+    const identity = sysmlElement('div', 'sysml-project-identity');
+    const title = sysmlElement('strong');
+    const status = sysmlElement('span', 'sysml-save-status');
+    status.setAttribute('role', 'status');
+    identity.append(title, status);
+    const actions = sysmlElement('div', 'sysml-actions');
+    const saveButton = sysmlButton('Supabase 저장', () => void save(), { className: 'sysml-primary' });
+    saveButton.title = '프로젝트 저장 (Ctrl+S)';
+    const json = sysmlButton('JSON 저장', () => exportProject());
+    const conflict = sysmlButton('충돌 초안 JSON 저장', () => exportProject(conflictDraft));
+    actions.append(saveButton, json, conflict);
+    let undoButton;
+    let redoButton;
+    if (isProjectPage) {
+      actions.append(
+        sysmlButton('JSON 열기', () => file.click()),
+        sysmlButton('새 프로젝트', () => showProjectDialog(), { icon: 'plus' })
+      );
+    } else {
+      undoButton = sysmlButton('실행 취소', () => undo(), { icon: 'undo' });
+      redoButton = sysmlButton('다시 실행', () => redo(), { icon: 'redo' });
+      undoButton.title = '실행 취소 (Ctrl+Z)';
+      redoButton.title = '다시 실행 (Ctrl+Shift+Z)';
+      actions.prepend(undoButton, redoButton);
+      actions.append(sysmlButton('프로젝트 열기', () => navigate('projects')));
+    }
+    element.append(identity, actions);
+    return { element, title, status, saveButton, json, conflict, undoButton, redoButton };
+  }
+
+  function project() {
+    return history?.value ?? null;
+  }
+
+  function model(projectValue = project()) {
+    return projectValue ? SysmlModel.getModel(projectValue) : null;
+  }
+
+  function stamp(value) {
+    return JSON.stringify([value.title, value.activeModelId, value.models]);
+  }
+
+  function dirty() {
+    return Boolean(project() && stamp(project()) !== remoteStamp);
+  }
+
+  function writeDraft() {
+    if (!project() || !store) return;
+    if (dirty() || pendingSave) draftAvailable = store.writeDraft(project());
+    else store.clearDraft(project().id);
+  }
+
+  function captureView() {
+    const current = model();
+    const center = editor.captureView();
+    if (current && center) {
+      current.viewCenter = { x: Math.round(center.x), y: Math.round(center.y) };
+    }
+  }
+
+  function beforeReplacingProject() {
+    if (switching || pendingSave) return false;
+    if (!history) return true;
+    captureView();
+    writeDraft();
+    return !dirty() || draftAvailable || window.confirm('이 브라우저에 초안을 보관할 수 없습니다. 다른 프로젝트를 열까요?');
+  }
+
+  function openInWorkspace(nextProject) {
+    history = SysmlModel.createHistory(nextProject);
+    remoteStamp = nextProject.isDraft || nextProject.revision === 0 ? '' : stamp(project());
+    draftAvailable = true;
+    conflictDraft = nextProject.conflictDraft ?? null;
+    statusMessage = nextProject.storageError ?? (conflictDraft ? '서버에 더 최신 버전이 있습니다. 이전 초안을 JSON 파일로 저장할 수 있습니다.' : '');
+    if (nextProject.revision === 0) writeDraft();
+    if (model()) navigate('sysml');
+    else navigate('projects');
+    render();
+  }
+
+  async function refreshProjects() {
+    const currentStore = store;
+    if (!currentStore || projectListLoading) return;
+    projectListError = '';
+    projectListLoading = true;
+    render();
+    try {
+      const list = await currentStore.list();
+      if (store === currentStore) records = list;
+    } catch (error) {
+      if (store === currentStore) {
+        records = currentStore.listDrafts();
+        projectListError = error.message;
+      }
+    } finally {
+      if (store === currentStore) {
+        projectListLoading = false;
+        render();
+      }
+    }
+  }
+
+  async function openProject(id) {
+    if (!store || !beforeReplacingProject()) return;
+    switching = true;
+    statusMessage = '';
+    const currentStore = store;
+    render();
+    try {
+      const nextProject = await currentStore.open(id);
+      if (store !== currentStore) return;
+      if (!nextProject) throw new Error('선택한 프로젝트를 열 수 없습니다.');
+      openInWorkspace(nextProject);
+      void currentStore.setLastProject(id, nextProject.revision > 0 && !nextProject.isDraft);
+    } catch (error) {
+      if (store === currentStore) statusMessage = error.message;
+    } finally {
+      if (store === currentStore) {
+        switching = false;
+        render();
+      }
+    }
+  }
+
+  async function importProject() {
+    const selected = file.files?.[0];
+    file.value = '';
+    if (!selected || !store || !beforeReplacingProject()) return;
+    switching = true;
+    const currentStore = store;
+    render();
+    try {
+      const imported = await currentStore.importFile(selected);
+      if (store === currentStore) {
+        openInWorkspace(imported);
+        statusMessage = '프로젝트 JSON을 열었습니다. 이 사본을 Supabase에 저장할 수 있습니다.';
+      }
+    } catch (error) {
+      if (store === currentStore) statusMessage = error.message;
+    } finally {
+      if (store === currentStore) {
+        switching = false;
+        render();
+      }
+    }
+  }
+  file.addEventListener('change', () => void importProject());
+
+  function exportProject(snapshot) {
+    if (!store || !project()) return;
+    if (!snapshot) captureView();
+    try {
+      store.exportFile(snapshot ?? project());
+    } catch (error) {
+      statusMessage = error.message;
+      render();
+    }
+  }
+
+  function save() {
+    if (pendingSave) return pendingSave;
+    if (!project() || !store || switching) return Promise.resolve(false);
+    captureView();
+    writeDraft();
+    const snapshot = structuredClone(project());
+    const currentStore = store;
+    statusMessage = '';
+    pendingSave = saveSnapshot();
+    render();
+    return pendingSave;
+
+    async function saveSnapshot() {
+      try {
+        const saved = await currentStore.save(snapshot);
+        if (store !== currentStore || project()?.id !== saved.id) return false;
+        project().revision = saved.revision;
+        remoteStamp = stamp(saved);
+        const updated = { id: saved.id, title: saved.title, revision: saved.revision, updatedAt: saved.updatedAt };
+        records = [updated, ...records.filter((item) => item.id !== saved.id)];
+        if (dirty()) writeDraft();
+        return true;
+      } catch (error) {
+        if (store === currentStore) {
+          statusMessage = error.message;
+          writeDraft();
+        }
+        return false;
+      } finally {
+        if (store === currentStore) {
+          pendingSave = null;
+          render();
+        }
+      }
+    }
+  }
+
+  function openDialog(title, initialName, kind, onApply) {
+    if (!store || switching || dialog.open) return;
+    focusBeforeDialog = document.activeElement;
+    dialogAction = onApply;
+    const form = sysmlElement('form');
+    const heading = sysmlElement('h2', '', title);
+    heading.id = 'sysml-dialog-title';
+    dialog.setAttribute('aria-labelledby', heading.id);
+    const name = sysmlElement('input');
+    name.type = 'text';
+    name.value = initialName;
+    name.maxLength = limits.maxNameLength;
+    name.required = true;
+    name.autofocus = true;
+    const nameLabel = sysmlElement('label', 'sysml-field', '이름');
+    nameLabel.append(name);
+    form.append(heading, nameLabel);
+    let kindInput;
+    if (kind) {
+      const typeLabel = sysmlElement('label', 'sysml-field', '모델 유형');
+      kindInput = sysmlElement('select');
+      for (const [key, label] of Object.entries(modelKinds)) {
+        const option = sysmlElement('option', '', label);
+        option.value = key;
+        kindInput.append(option);
+      }
+      kindInput.value = kind;
+      typeLabel.append(kindInput);
+      form.append(typeLabel);
+    }
+    const controls = sysmlElement('div', 'sysml-actions');
+    const apply = sysmlElement('button', 'sysml-primary', initialName ? '적용' : '만들기');
+    apply.type = 'submit';
+    controls.append(sysmlButton('취소', () => dialog.close()), apply);
+    form.append(controls);
+    name.addEventListener('input', () => name.setCustomValidity(''));
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!name.value.trim()) {
+        name.setCustomValidity('이름을 입력하세요.');
+        name.reportValidity();
+        return;
+      }
+      const action = dialogAction;
+      dialog.close();
+      action(name.value.trim(), kindInput?.value);
+    });
+    dialog.replaceChildren(form);
+    dialog.showModal();
+    name.select();
+  }
+  dialog.addEventListener('close', () => {
+    if (!dialog.open && focusBeforeDialog?.isConnected) focusBeforeDialog.focus({ preventScroll: true });
+  });
+
+  function showProjectDialog(addModel = false) {
+    openDialog('새 프로젝트', '', null, (name) => {
+      if (!beforeReplacingProject()) return;
+      openInWorkspace(store.create(name));
+      if (addModel) showModelDialog();
+    });
+  }
+
+  function requestNewModel() {
+    if (project()) showModelDialog();
+    else showProjectDialog(true);
+  }
+
+  function showModelDialog(existing = null) {
+    openDialog(existing ? 'SysML 모델 편집' : 'SysML 모델 추가', existing?.name ?? '', existing?.kind ?? 'system', (name, kind) => {
+      captureView();
+      if (existing) edit((draft) => SysmlModel.renameModel(SysmlModel.getModel(draft, existing.id), name, kind));
+      else edit((draft) => SysmlModel.addModel(draft, name, kind));
+      navigate('sysml');
+    });
+  }
+
+  function removeModel() {
+    const current = model();
+    if (!current || !window.confirm(`‘${current.name}’ 모델과 다이어그램을 삭제할까요?`)) return;
+    edit((draft) => SysmlModel.removeModel(draft, current.id));
+  }
+
+  function activateModel(id) {
+    if (!project() || switching) return;
+    if (id !== project().activeModelId) {
+      captureView();
+      project().activeModelId = id;
+      writeDraft();
+    }
+    navigate('sysml');
+  }
+
+  function editModel(update) {
+    return edit((draft) => update(SysmlModel.getModel(draft)));
+  }
+
+  function edit(update) {
+    if (!history || switching) return undefined;
+    try {
+      const result = history.apply(update);
+      statusMessage = '';
+      writeDraft();
+      render();
+      return result;
+    } catch (error) {
+      statusMessage = error.message;
+      render();
+      return undefined;
+    }
+  }
+
+  function undo() {
+    if (!switching && history?.undo()) {
+      writeDraft();
+      render();
+    }
+  }
+
+  function redo() {
+    if (!switching && history?.redo()) {
+      writeDraft();
+      render();
+    }
+  }
+
+  function render() {
+    const current = project();
+    const currentModel = model();
+    const currentModule = activeModule();
+    const status = pendingSave ? 'Supabase에 저장 중…'
+      : switching ? '프로젝트를 여는 중…'
+        : statusMessage || (current ? (dirty() ? (draftAvailable ? '미저장 · 이 브라우저에 초안 보관' : '미저장') : `저장 완료 · 리비전 ${current.revision}`) : '');
+    for (const bar of [projectBar, editorBar]) {
+      bar.title.textContent = current?.title ?? '프로젝트';
+      bar.status.textContent = status;
+      bar.status.classList.toggle('sysml-status-error', Boolean(statusMessage && !pendingSave && !switching));
+      bar.saveButton.disabled = !current || switching || Boolean(pendingSave);
+      bar.json.disabled = !current;
+      bar.conflict.hidden = !conflictDraft;
+    }
+    editorBar.undoButton.disabled = switching || !history?.canUndo;
+    editorBar.redoButton.disabled = switching || !history?.canRedo;
+    newModelLink.disabled = switching || !store;
+    empty.hidden = Boolean(currentModel);
+    editor.element.hidden = !currentModel;
+    emptyTitle.textContent = current ? 'SysML 모델을 추가하세요' : '프로젝트를 먼저 여세요';
+    emptyMessage.textContent = current ? '하드웨어, 소프트웨어 등 여러 모델을 한 프로젝트에서 관리할 수 있습니다.' : '새 프로젝트를 만들거나 기존 프로젝트를 열어 모델링을 시작하세요.';
+    emptyAction.lastChild.textContent = current ? 'SysML 모델 추가' : '새 프로젝트와 모델 만들기';
+    emptyAction.disabled = switching || !store;
+    if (currentModule === 'sysml' || !currentModel) editor.render(currentModel);
+
+    const navigationStamp = JSON.stringify([current?.id, current?.activeModelId, currentModule, current?.models.map(({ id, name, kind }) => [id, name, kind])]);
+    if (modelNavigationStamp !== navigationStamp) {
+      modelNavigationStamp = navigationStamp;
+      modelLinks.replaceChildren();
+      for (const item of current?.models ?? []) {
+        const button = sysmlButton(item.name, () => activateModel(item.id), { icon: 'model' });
+        button.title = `${item.name} · ${modelKinds[item.kind]}`;
+        if (item.id === current.activeModelId && currentModule === 'sysml') button.setAttribute('aria-current', 'true');
+        button.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          activateModel(item.id);
+          showModelDialog(item);
+        });
+        modelLinks.append(button);
+      }
+    }
+
+    const summaries = records.filter((item) => item.id !== current?.id);
+    if (current) summaries.unshift({ id: current.id, title: current.title, revision: current.revision, isDraft: current.revision === 0 });
+    const listStamp = JSON.stringify([summaries, switching, Boolean(pendingSave)]);
+    if (projectListStamp !== listStamp) {
+      projectListStamp = listStamp;
+      projectList.replaceChildren();
+      for (const item of summaries) {
+        const row = sysmlElement('div', 'sysml-project-row');
+        const details = sysmlElement('div');
+        const title = sysmlElement('strong', '', item.title);
+        let caption = item.isDraft ? '브라우저 초안' : `리비전 ${item.revision}`;
+        if (item.id === current?.id) caption = `현재 프로젝트 · ${caption}`;
+        details.append(title, sysmlElement('span', '', caption));
+        const button = sysmlButton('열기', () => void openProject(item.id));
+        button.disabled = switching || Boolean(pendingSave);
+        button.setAttribute('aria-label', `${item.title} 열기`);
+        row.append(createSysmlIcon('model'), details, button);
+        projectList.append(row);
+      }
+    }
+    projectPlaceholder.textContent = projectListError || (projectListLoading ? '프로젝트 목록을 불러오는 중…' : (summaries.length ? '' : '프로젝트를 만들거나 프로젝트 JSON 파일을 여세요.'));
+    projectPlaceholder.hidden = !projectPlaceholder.textContent;
+  }
+
+  async function start(client, userId) {
+    const currentStore = createSysmlProjectStore(client, userId);
+    store = currentStore;
+    switching = true;
+    void refreshProjects();
+    try {
+      const restored = await currentStore.restore();
+      if (store === currentStore && restored) openInWorkspace(restored);
+    } catch (error) {
+      if (store === currentStore) statusMessage = error.message;
+    } finally {
+      if (store === currentStore) {
+        switching = false;
+        render();
+      }
+    }
+  }
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!dirty() && !pendingSave) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
+  return {
+    navigation, projects, sysml, start,
+    render(active, entering) {
+      render();
+      if (entering && active === 'sysml' && model()) editor.restoreView();
+      if (entering && active === 'projects') void refreshProjects();
+    },
+    leaveEditor() {
+      captureView();
+      writeDraft();
+    },
+    stop() {
+      if (dialog.open) dialog.close();
+      store = null;
+      history = null;
+      records = [];
+      remoteStamp = '';
+      pendingSave = null;
+      statusMessage = '';
+      projectListError = '';
+      projectListLoading = false;
+      switching = false;
+      conflictDraft = null;
+      render();
+    },
+    async beforeLogout() {
+      if (pendingSave) await pendingSave;
+      captureView();
+      writeDraft();
+      if (!dirty()) return true;
+      if (draftAvailable) return window.confirm('Supabase에 저장하지 않은 변경이 이 브라우저의 초안에 있습니다. 로그아웃할까요?');
+      return window.confirm('Supabase에 저장하지 않은 변경이 있습니다. 로그아웃할까요?');
+    },
+    handleKey(event) {
+      const key = event.key.toLowerCase();
+      const command = (event.ctrlKey || event.metaKey) && !event.altKey;
+      if (dialog.open) return false;
+      if (command && key === 's' && project() && ['projects', 'sysml'].includes(activeModule())) {
+        if (event.target.matches?.('input, textarea')) event.target.blur();
+        void save();
+        return true;
+      }
+      if (activeModule() !== 'sysml') return false;
+      if (key === 'escape' && editor.cancel()) return true;
+      if (!command || !['z', 'y'].includes(key) || event.target.closest('input, textarea, select, [contenteditable]')) return false;
+      if (key === 'y' || event.shiftKey) redo();
+      else undo();
+      return true;
+    }
+  };
+}

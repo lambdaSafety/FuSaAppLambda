@@ -6,6 +6,8 @@
   <title>로그인 | 안전분석 공업 수학</title>
   <link rel="stylesheet" href="./workspace.css">
   <link rel="stylesheet" href="./expo-calculator.css">
+  <link rel="stylesheet" href="./sysml-canvas.css">
+  <link rel="stylesheet" href="./sysml-workspace.css">
   <style>
     :root { font-family: system-ui, "Malgun Gothic", sans-serif; color: #152c3c; background: #edf3f5; }
     * { box-sizing: border-box; }
@@ -76,6 +78,11 @@
   <script src="./expo-model.js"></script>
   <script src="./expo-chart.js"></script>
   <script src="./expo-calculator.js"></script>
+  <script src="./sysml-model.js"></script>
+  <script src="./sysml-projects.js"></script>
+  <script src="./sysml-canvas.js"></script>
+  <script src="./sysml-editor.js"></script>
+  <script src="./sysml-workspace.js"></script>
   <script src="./workspace.js"></script>
   <script>
     const loginView = document.querySelector('#login-view');
@@ -91,17 +98,20 @@
     const workspaceError = document.querySelector('#workspace-error');
     let signedInUserId = null;
 
-    function renderSession(session) {
+    function renderSession(client, session) {
       const user = session?.user;
       const previousUserId = signedInUserId;
       signedInUserId = user?.id ?? null;
+      if (previousUserId && previousUserId !== signedInUserId) workspace.stop();
       loginView.hidden = Boolean(user);
       workspaceView.hidden = !user;
       account.textContent = user?.email ?? '';
       account.title = account.textContent;
       if (user && user.id !== previousUserId) {
         workspaceError.textContent = '';
-        workspace.reset();
+        setTimeout(() => {
+          if (signedInUserId === user.id) workspace.start(client, user.id);
+        }, 0);
       }
       if (!user && previousUserId) {
         document.title = '로그인 | 안전분석 공업 수학';
@@ -116,13 +126,14 @@
 
     async function connect() {
       const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-      const { auth } = createClient(
+      const client = createClient(
         'https://qdhvtpbdvaumaxfsophi.supabase.co',
         'sb_publishable_FRN-xKOni94iN5O6F1Flig_tPWrCtf7'
       );
+      const { auth } = client;
 
       auth.onAuthStateChange((event, session) => {
-        renderSession(session);
+        renderSession(client, session);
         if (event === 'INITIAL_SESSION') {
           submit.disabled = false;
           submit.textContent = '로그인';
@@ -159,6 +170,7 @@
         logout.disabled = true;
         workspaceError.textContent = '';
         try {
+          if (!await workspace.beforeLogout()) return;
           const { error: failure } = await auth.signOut({ scope: 'local' });
           if (failure) throw failure;
         } catch {
