@@ -33,7 +33,7 @@ DB 스키마는 4절에서 별도로 적용한다. 저장소와 사이트 주소
 
 | 항목 | 값 |
 | --- | --- |
-| Project URL | `https://qdhvtpbdvaumaxfsophi.supabase.co` |
+| Project URL | 로그인 페이지의 `createClient()`에 지정한 프로젝트 주소 |
 | Publishable key | 로그인 페이지의 `createClient()`에 지정한 공개 키 |
 
 1. Supabase 프로젝트 대시보드에서 **Authentication → Users**로 이동한다.
@@ -41,7 +41,7 @@ DB 스키마는 4절에서 별도로 적용한다. 저장소와 사이트 주소
 3. 배포 URL에서 로그인 화면을 열고 등록한 이메일과 비밀번호를 입력한다.
 4. 로그인하면 프로젝트 목록이나 마지막으로 작업한 SysML 프로젝트가 열린다. 헤더에서 계정 이메일을 확인할 수 있고, 로그아웃을 누르면 로그인 화면에 돌아간다.
 
-브라우저는 Project URL과 Publishable key를 사용한다. Secret key와 `service_role` 키는 서버 측 설정에서 관리한다.
+브라우저는 Project URL과 Publishable key를 사용한다. Secret key와 `service_role` 키는 서버 측 설정에서 관리한다. 시험 계정 비밀번호와 개인 연결 메모는 저장소 밖의 로컬 공간에 보관한다.
 
 [Supabase 이메일·비밀번호 인증](https://supabase.com/docs/guides/auth/passwords)
 
