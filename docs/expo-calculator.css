@@ -110,6 +110,23 @@
   font-size: clamp(1rem, 2.5vw, 1.3rem);
 }
 
+.ft-equation + .ft-equation {
+  margin-top: .5rem;
+}
+
+.ft-equation code {
+  white-space: pre-wrap;
+}
+
+.fta-top-event > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.fta-top-event[open] > summary {
+  margin-bottom: 1rem;
+}
+
 .expo-values {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
@@ -142,3 +159,60 @@
   height: auto;
   margin-inline: auto;
 }
+
+.repair-integrals,
+.repair-metrics {
+  display: grid;
+  gap: 1rem;
+}
+
+.repair-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 1fr));
+}
+
+.repair-metric {
+  --curve: var(--accent);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  border-top: 3px solid var(--curve);
+}
+
+.repair-metric[data-metric="expectedDowntime"] { --curve: #6240ab; }
+.repair-metric[data-metric="cumulativeHazard"] { --curve: #965021; }
+
+.repair-total {
+  margin-bottom: .75rem;
+  color: var(--curve);
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.repair-total output { font-weight: 750; }
+.repair-total span { font-size: .875rem; }
+.repair-metric math { margin: .35rem 0; }
+.repair-metric p { font-size: .95rem; }
+.repair-trend { margin-top: auto; }
+.repair-trend svg { display: block; width: 100%; height: auto; }
+.repair-trend text { font: 13px system-ui, sans-serif; fill: var(--muted); }
+.repair-plot-area { fill: var(--surface); }
+.repair-gridline { stroke: var(--line); }
+.repair-curve { fill: none; stroke: var(--curve); stroke-width: 2.25; }
+.repair-endpoint { fill: var(--curve); }
+
+.repair-metric dl {
+  display: grid;
+  align-content: start;
+  gap: .35rem;
+  min-height: 4.5rem;
+  margin: .75rem 0 0;
+  padding-top: .625rem;
+  border-top: 1px solid var(--line);
+  font-size: .875rem;
+}
+
+.repair-metric dl div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 .5rem; }
+.repair-metric dt { color: var(--muted); }
+.repair-metric dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.repair-method .repair-check { margin-bottom: 0; color: var(--accent); font-weight: 650; }

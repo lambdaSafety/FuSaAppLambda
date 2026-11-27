@@ -33,6 +33,52 @@ if (result.ok) {
 
 계산기 화면은 `exponentialDistribution.prepare(mode, parameters)`로 결과와 그래프에 필요한 표본 함수를 함께 얻는다. 검증에 성공하면 `{ ok: true, inputs, result, sample }`을 반환한다. `inputs`는 변환한 숫자를 담은 읽기 전용 객체이며, 모델에 쓰이지 않는 필드는 0이다. `result`는 같은 입력으로 `calculate`를 호출한 결과와 같다. `sample(time, age)`는 지정한 시각의 확률과 빈도를 반환한다. 주기 검사 그래프는 구간 경과 시간 `age`를 직접 넘겨 검사 직전과 직후를 그린다. 생략한 `age`의 기본값은 0이다. 미션 시간의 정확한 검사 시점 판정은 `calculate`의 반환값과 `prepare`의 `result`에 적용된다. 검증 오류 형식은 두 함수가 같다.
 
+## FT 이벤트 계산 API
+
+**확률 → FT 이벤트**와 **안전분석 → FTA → 최상위사상(TLE) 계산기**가 [공통 FT 이벤트 모듈](./docs/ft-event-model.js)을 사용한다. 서로 독립인 비수리 기본 이벤트 두 개의 고장률 `lambda1`, `lambda2`(h⁻¹)와 임무 시간 `t`(h)를 넘긴다. 입력 형식과 범위는 지수 분포 API와 같다.
+
+```js
+const result = ftEvent.calculate({ lambda1: '1e-8', lambda2: '2e-8', t: '1000' });
+
+if (result.ok) {
+  const { probability, frequency } = result.or;
+  // result.and에서 AND 게이트의 동일한 두 값을 얻는다.
+}
+```
+
+`probability`는 $Q(t)$, `frequency`는 $\omega(t)$의 값이다. `ftEvent.prepare(parameters)`는 변환된 `inputs`, 임무 시간의 `result`, 다른 시간의 OR·AND 결과를 함께 구하는 `sample(time)`을 제공한다. `sample`에는 0 이상의 유한한 시간(h)을 넘긴다. 두 함수 모두 유효하지 않은 입력에 `{ ok: false, fields: [...] }`를 반환한다. 계산한 순간 고장 빈도가 숫자 표현 범위를 초과하면 `Infinity`를 반환한다.
+
+## 수리 이벤트의 누적 적분 API
+
+**확률 → Q(t), W(t)**에서 사용하는 모듈은 처음에 정상인 단일 수리 이벤트를 계산한다. 다른 메뉴도 같은 페이지에서 다음과 같이 호출할 수 있다. 입력 검증과 시점 비가용도 $Q(T)$, 순간 고장 빈도 $\omega(T)$는 기존 지수 분포 수리 모델을 공유한다. [수리 이벤트 적분 모듈](./docs/repair-integrals-model.js)
+
+~~~js
+const values = repairIntegrals.calculate({ lambda: '5e-7', mu: '0.01', t: '1000' });
+if (values.ok) {
+  const { expectedFailures, expectedDowntime, cumulativeHazard } = values;
+}
+~~~
+
+| 반환 필드 | 수식 | 의미와 단위 |
+| --- | --- | --- |
+| `expectedFailures` | $W(T)=\int_0^T \omega(t)\,dt$ | 수리 후 재고장을 포함한 기대 고장 횟수(회) |
+| `expectedDowntime` | $D(T)=\int_0^T Q(t)\,dt$ | 기대 비가용 시간(h) |
+| `cumulativeHazard` | $H(T)=\int_0^T \lambda_{\rm sys}(t)\,dt=\lambda T$ | 정상 상태를 조건으로 한 누적 고장 강도(무차원) |
+| `probability`, `frequency` | $Q(T),\ \omega(T)=\lambda[1-Q(T)]$ | 시점 비가용도, 비조건부 고장 빈도(h⁻¹) |
+| `averageUnavailability`, `unreliability` | $Q_{\rm avg}(T)=D(T)/T,\ F(T)=1-e^{-H(T)}$ | 평균 비가용도, 임무 중 한 번 이상 고장 날 확률 |
+
+`repairIntegrals.prepare(parameters)`는 숫자로 변환한 `inputs`, 임무 시간의 `result`, 다른 시각을 평가하는 `sample(time)`, 수치 적분으로 검산하는 `checkIntegration()`을 제공한다. `sample`에는 0 이상의 유한한 숫자(h)를 전달한다. `checkIntegration`은 세 누적값, 평균 비가용도, 비신뢰도, 실제 심프슨 구간 수(`panels`)를 반환한다. `prepare`와 `calculate` 모두 입력 오류 시 `{ ok: false, fields: [...] }`를 반환한다. $T=0$이면 세 적분은 0이며 평균 비가용도는 `null`이다. 반환값은 배정밀도 숫자이며, 숫자 범위를 초과한 누적값은 `Infinity`다.
+
+$k=\lambda+\mu>0$이면 적분의 해석해는 다음과 같다. $\lambda=\mu=0$이면 세 누적값은 모두 0이다.
+
+$$
+D(T)=\frac{\lambda}{k}\left[T-\frac{1-e^{-kT}}{k}\right],\qquad
+W(T)=\frac{\lambda\mu}{k}T+\left(\frac{\lambda}{k}\right)^2(1-e^{-kT}),\qquad
+H(T)=\lambda T.
+$$
+
+계산값은 해석식으로 구한다. $x=kT<1$에서는 $(x+e^{-x}-1)/x^2=1/2-x/6+x^2/24-\cdots$를 사용해 초기 비가용 시간의 유효숫자를 보존한다. 곱과 비율은 2의 거듭제곱으로 스케일링한다. 검산은 무차원 지수항에 적응형 심프슨 적분을 적용한다. 한 구간과 두 반쪽 구간의 근사치 차이를 15로 나눈 절댓값이 구간 허용치를 넘으면 두 구간으로 나누고 허용치도 절반씩 배분한다. 최초 절대 허용치는 $10^{-13}$이다. $x>40$에서는 40 이후의 지수 꼬리를 해석식으로 더한다. 상수 $\lambda$는 구간 분할 없이 적분한다. 그래프의 각 시점도 해석식으로 평가한다. [medini analyze User Guide의 FTA 평가 지표](https://ansyshelp.ansys.com/public/Views/Secured/medini/v261/en/pdf/Ansys_medini_analyze_User_Guide.pdf)
+
 ## 확률과 Frequency
 
 세 모델 모두 미션 시작 시 부품이 정상이라고 가정한다. 고장 확률은 $P(t)$로 나타낸다. Frequency는 순간 고장 발생 빈도로, 고장률 λ에 시각 $t$의 정상 상태 확률을 곱한 값이다. 단위는 h⁻¹이다.

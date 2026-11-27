@@ -1,4 +1,20 @@
-function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
+function expoSampleTimes(duration, steps, transitionRates) {
+  const times = new Set(Array.from({ length: steps + 1 }, (_, step) => duration * (step / steps)));
+  // Add points around the exponential transition even on a long time axis.
+  for (const rate of transitionRates) {
+    if (rate <= 0 || !Number.isFinite(rate)) continue;
+    for (let factor = 1 / 32; factor <= 32; factor *= 2) {
+      const time = factor / rate;
+      if (time > 0 && time < duration) times.add(time);
+    }
+  }
+  return [...times].sort((a, b) => a - b);
+}
+
+function createExpoChart(container, {
+  mode, inputs, result, evaluate, label, rates,
+  probabilityLabel = '확률', frequencyLabel = 'Frequency'
+}) {
   const { t, tau, lambda, mu } = inputs;
   const requestedEnd = t === 0 ? (mode === 'monitoring' && tau > 0 ? tau : 1) : t;
   const extendedEnd = t > 0 && t <= Number.MAX_VALUE / 1.2 ? t * 1.2 : requestedEnd;
@@ -11,18 +27,6 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
     points.push({ ...evaluate(time, age), x: time / end });
   }
 
-  function sampleTimes(duration, steps, rate) {
-    const times = new Set(Array.from({ length: steps + 1 }, (_, step) => duration * (step / steps)));
-    // Add points around the exponential transition even on a long time axis.
-    if (rate > 0) {
-      for (let factor = 1 / 32; factor <= 32; factor *= 2) {
-        const time = factor / rate;
-        if (time > 0 && time < duration) times.add(time);
-      }
-    }
-    return [...times].sort((a, b) => a - b);
-  }
-
   if (monitoring) {
     // Sample both sides of every inspection within the visible range.
     for (let cycle = 0; cycle < 12; cycle += 1) {
@@ -31,22 +35,24 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
       const next = (cycle + 1) * tau;
       const to = Math.min(end, next);
       const duration = next <= end ? tau : to - from;
-      for (const age of sampleTimes(duration, 32, lambda)) {
+      for (const age of expoSampleTimes(duration, 32, [lambda])) {
         sample(age === duration ? to : Math.min(to, from + age), age);
       }
     }
   } else {
-    const rate = mode === 'repair' ? Math.max(lambda, mu) : lambda;
-    for (const time of sampleTimes(end, 224, rate)) {
+    const transitionRates = rates ?? [mode === 'repair' ? Math.max(lambda, mu) : lambda];
+    for (const time of expoSampleTimes(end, 224, transitionRates)) {
       sample(time);
     }
   }
 
   const probabilityMax = Math.max(mission?.probability ?? 0, ...points.map(point => point.probability)) || 1;
-  const frequencyMax = Math.max(mission?.frequency ?? 0, ...points.map(point => point.frequency)) || 1;
+  const frequencies = [...points.map(point => point.frequency), mission?.frequency ?? 0];
+  const finiteFrequencies = frequencies.filter(Number.isFinite);
+  const frequencyMax = Math.max(0, ...finiteFrequencies) || 1;
   const canvas = document.createElement('canvas');
   canvas.setAttribute('role', 'img');
-  canvas.setAttribute('aria-label', label + ' 그래프. 시간은 가로축, 확률은 왼쪽 축, Frequency는 오른쪽 축.');
+  canvas.setAttribute('aria-label', `${label} 그래프. 시간은 가로축, 왼쪽 축은 ${probabilityLabel}, 오른쪽 축은 ${frequencyLabel}.`);
   canvas.textContent = canvas.getAttribute('aria-label');
   container.append(canvas);
 
@@ -54,6 +60,13 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
     const note = document.createElement('p');
     note.className = 'expo-chart-note';
     note.textContent = '그래프는 처음 12회 검사 구간을 표시합니다. 입력한 미션 시간은 그래프 범위 밖에 있습니다.';
+    container.append(note);
+  }
+
+  if (finiteFrequencies.length !== frequencies.length) {
+    const note = document.createElement('p');
+    note.className = 'expo-chart-note';
+    note.textContent = '일부 시점의 고장 빈도가 숫자 표현 범위를 넘어 그래프에서 생략됩니다.';
     container.append(note);
   }
 
@@ -101,8 +114,8 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
       context.stroke();
     }
 
-    text('확률', left, 17, probabilityColor);
-    text('Frequency (1/h)', right, 17, frequencyColor, 'right');
+    text(probabilityLabel, left, 17, probabilityColor);
+    text(`${frequencyLabel} (1/h)`, right, 17, frequencyColor, 'right');
     context.fillStyle = '#f4f8fa';
     context.fillRect(left, top, right - left, bottom - top);
     for (const [index, ratio] of ticks.entries()) {
@@ -126,11 +139,17 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
       context.lineWidth = 2;
       context.setLineDash(dash);
       context.beginPath();
-      for (const [index, point] of points.entries()) {
+      let continueLine = false;
+      for (const point of points) {
+        if (!Number.isFinite(point[field])) {
+          continueLine = false;
+          continue;
+        }
         const horizontal = x(point.x);
         const vertical = y(point[field] / maximum);
-        if (index === 0) context.moveTo(horizontal, vertical);
-        else context.lineTo(horizontal, vertical);
+        if (continueLine) context.lineTo(horizontal, vertical);
+        else context.moveTo(horizontal, vertical);
+        continueLine = true;
       }
       context.stroke();
       context.setLineDash([]);
@@ -149,6 +168,7 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
         [mission.probability, probabilityMax, probabilityColor],
         [mission.frequency, frequencyMax, frequencyColor]
       ]) {
+        if (!Number.isFinite(value)) continue;
         context.fillStyle = color;
         context.beginPath();
         context.arc(x(mission.x), y(value / max), 3.5, 0, 2 * Math.PI);
@@ -164,8 +184,8 @@ function createExpoChart(container, { mode, inputs, result, evaluate, label }) {
     }
 
     const legendStart = Math.max(9, (width - (mission ? 246 : 153)) / 2);
-    legend(legendStart, '확률', probabilityColor, []);
-    legend(legendStart + 60, 'Frequency', frequencyColor, [5, 3]);
+    legend(legendStart, probabilityLabel, probabilityColor, []);
+    legend(legendStart + 60, frequencyLabel, frequencyColor, [5, 3]);
     if (mission) legend(legendStart + 153, '미션 시간 t', missionColor, [2, 4]);
   }
 

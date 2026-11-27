@@ -56,10 +56,10 @@ const workspaceMenu = [
       {
         id: 'fta',
         title: 'FTA',
-        description: '기본사상의 지수 분포 모델을 선택해 임무 시간에서의 고장 확률과 빈도를 계산합니다.',
-        createContent: () => createExpoCalculator({ selectModel: true }),
+        description: '기본사상과 OR·AND 최상위사상의 고장 확률과 빈도를 계산합니다.',
+        createContent: createFtaCalculators,
         features: [
-          'AND·OR 게이트와 기본사상 재사용을 우선 지원',
+          '고장 트리 편집기에서 AND·OR 게이트와 기본사상 재사용 지원',
           'FTA 결과에서 최소 컷셋과 최상위사상 확률 확인',
           '후속 지원 범위에 k-out-of-n 게이트 포함'
         ],
@@ -94,6 +94,18 @@ const workspaceMenu = [
         title: '지수 분포',
         description: '고장률과 임무 시간을 입력해 비수리, 수리, 주기 검사 모델의 확률과 고장 빈도를 비교합니다.',
         createContent: createExpoCalculator
+      },
+      {
+        id: 'ft-event',
+        title: 'FT 이벤트',
+        description: '독립인 비수리 기본 이벤트 두 개를 조합해 OR·AND 최상위사상(TLE)의 확률과 순간 고장 빈도를 비교합니다.',
+        createContent: createFtEventCalculator
+      },
+      {
+        id: 'repair-integrals',
+        title: 'Q(t), W(t)',
+        description: '수리 가능한 지수 분포 이벤트 하나에 대해 임무 시작부터 T까지의 고장 횟수, 비가용 시간, 누적 고장 강도를 계산합니다.',
+        createContent: createRepairIntegralsCalculator
       },
       {
         id: 'conditional-probability',
@@ -151,6 +163,25 @@ const workspaceMenu = [
     features: ['표시 언어와 기본 시간 단위 선택', '확률 표시 자릿수 설정']
   }
 ];
+
+function createFtaCalculators() {
+  const panel = document.createElement('div');
+  panel.className = 'expo-calculator expo-results';
+
+  const topEvent = document.createElement('details');
+  topEvent.className = 'expo-card fta-top-event';
+  const summary = document.createElement('summary');
+  summary.textContent = '최상위사상(TLE) 계산기';
+  topEvent.append(summary);
+  topEvent.addEventListener('toggle', function mountTopEvent() {
+    if (!topEvent.open) return;
+    topEvent.append(createFtEventCalculator());
+    topEvent.removeEventListener('toggle', mountTopEvent);
+  });
+
+  panel.append(createExpoCalculator({ selectModel: true }), topEvent);
+  return panel;
+}
 
 function createWorkspace(root) {
   const nav = root.querySelector('#module-nav');
