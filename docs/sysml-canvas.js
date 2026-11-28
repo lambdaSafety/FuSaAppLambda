@@ -13,7 +13,7 @@ function createSysmlIcon(type) {
     failure: '!',
     malfunction: 'ϟ',
     connector: '↔',
-    model: '▤',
+    dependency: '⇢',
     plus: '+',
     undo: '↶',
     redo: '↷',
@@ -24,12 +24,26 @@ function createSysmlIcon(type) {
   icon.className = 'sysml-icon';
   icon.dataset.icon = type;
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = glyphs[type] ?? '•';
+  if (type === 'model') {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', 'M9 3h6v5H9z M3 16h6v5H3z M15 16h6v5h-6z M12 8v4 M6 16v-4h12v4');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.7');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    icon.append(svg);
+  } else icon.textContent = glyphs[type] ?? '•';
   return icon;
 }
 
 function createSysmlCanvas({
   kindIcon = createSysmlIcon,
+  nodeTypes = SysmlModel.types,
+  emptyMessage = null,
+  dragKinds = ['tree', 'palette'],
   onDrop,
   onSelect,
   onMove,
@@ -45,6 +59,7 @@ function createSysmlCanvas({
   viewport.tabIndex = 0;
   const surface = document.createElement('div');
   surface.className = 'sysml-canvas-surface';
+  const markerPrefix = 'sysml-arrow-' + SysmlModel.newId();
   const lines = svgElement('svg', { class: 'sysml-canvas-lines' });
   const cards = document.createElement('div');
   cards.className = 'sysml-canvas-cards';
@@ -70,7 +85,7 @@ function createSysmlCanvas({
   }
 
   function nodeLabel(node) {
-    return node.name || SysmlModel.types[node.type].label;
+    return node.name || nodeTypes[node.type].label;
   }
 
   function textColor(fill) {
@@ -93,13 +108,18 @@ function createSysmlCanvas({
     card.style.top = y + 'px';
   }
 
+  function nodeSize(node) {
+    return drag?.id === node.id && drag.size ? drag.size : node;
+  }
+
   function sizeSurface() {
     let right = 0;
     let bottom = 0;
     for (const node of placed.values()) {
       const { x, y } = nodePoint(node);
-      right = Math.max(right, x + node.width);
-      bottom = Math.max(bottom, y + node.height);
+      const { width, height } = nodeSize(node);
+      right = Math.max(right, x + width);
+      bottom = Math.max(bottom, y + height);
     }
     surface.style.width = right ? right + 160 + 'px' : '';
     surface.style.height = bottom ? bottom + 106 + 'px' : '';
@@ -107,25 +127,31 @@ function createSysmlCanvas({
 
   function center(node) {
     const point = nodePoint(node);
-    return { x: point.x + node.width / 2, y: point.y + node.height / 2 };
+    const { width, height } = nodeSize(node);
+    return { x: point.x + width / 2, y: point.y + height / 2 };
   }
 
   function borderPoint(node, toward) {
     const origin = center(node);
     const dx = toward.x - origin.x;
     const dy = toward.y - origin.y;
-    const extent = Math.max(Math.abs(dx) / (node.width / 2), Math.abs(dy) / (node.height / 2));
-    if (extent === 0) return { x: origin.x + node.width / 2, y: origin.y };
+    const { width, height } = nodeSize(node);
+    const offsetX = dx / (width / 2);
+    const offsetY = dy / (height / 2);
+    const extent = ['solution', 'assumption', 'justification'].includes(node.type)
+      ? Math.hypot(offsetX, offsetY) : Math.max(Math.abs(offsetX), Math.abs(offsetY));
+    if (extent === 0) return { x: origin.x + width / 2, y: origin.y };
     return { x: origin.x + dx / extent, y: origin.y + dy / extent };
   }
 
-  function connectorPath(from, to, route, index) {
+  function connectorPath(from, to, route, index, lane) {
     const a = center(from);
     const b = center(to);
     if (from.id === to.id || (a.x === b.x && a.y === b.y)) {
-      const x = a.x + from.width / 2;
+      const { width, height } = nodeSize(from);
+      const x = a.x + width / 2;
       const y = a.y;
-      const spread = Math.max(9, Math.min(from.height / 4, 24));
+      const spread = Math.min(height / 2, Math.max(9, Math.min(height / 4, 24)));
       const reach = 44 + index * 13;
       if (route === 'orthogonal') return {
         path: 'M ' + x + ' ' + (y - spread) + ' h ' + reach + ' v ' + (2 * spread) + ' h ' + (-reach),
@@ -138,72 +164,105 @@ function createSysmlCanvas({
         labelY: y - 9
       };
     }
-    const start = borderPoint(from, b);
-    const end = borderPoint(to, a);
+    const distance = Math.hypot(b.x - a.x, b.y - a.y);
+    const bend = {
+      x: (a.x + b.x) / 2 - (b.y - a.y) / distance * lane,
+      y: (a.y + b.y) / 2 + (b.x - a.x) / distance * lane
+    };
+    const start = borderPoint(from, lane ? bend : b);
+    const end = borderPoint(to, lane ? bend : a);
     const midX = (start.x + end.x) / 2;
     const midY = (start.y + end.y) / 2;
-    let path = 'M ' + start.x + ' ' + start.y;
+    let path = `M ${start.x} ${start.y}`;
     if (route === 'orthogonal') {
+      const x = midX + lane;
+      const y = midY + lane;
       path += Math.abs(a.x - b.x) >= Math.abs(a.y - b.y)
-        ? ' H ' + midX + ' V ' + end.y + ' H ' + end.x
-        : ' V ' + midY + ' H ' + end.x + ' V ' + end.y;
-    } else path += ' L ' + end.x + ' ' + end.y;
+        ? ` H ${x} V ${end.y} H ${end.x}`
+        : ` V ${y} H ${end.x} V ${end.y}`;
+      return { path, labelX: x, labelY: y - 8 };
+    }
+    path += ` L ${end.x} ${end.y}`;
     return { path, labelX: midX, labelY: midY - 8 };
   }
 
+  let hiddenItems = new Set();
+
   function drawConnectors() {
     const byPair = new Map();
+    const definitions = svgElement('defs');
     const connectors = document.createDocumentFragment();
     const connectorLabels = document.createDocumentFragment();
     for (const connector of model?.connectors ?? []) {
-      if (!placed.has(connector.sourceId) || !placed.has(connector.targetId)) continue;
+      if (hiddenItems.has(connector.id) || !placed.has(connector.sourceId) || !placed.has(connector.targetId)) continue;
       const pair = JSON.stringify([connector.sourceId, connector.targetId].sort());
       if (!byPair.has(pair)) byPair.set(pair, []);
       byPair.get(pair).push(connector);
     }
     for (const group of byPair.values()) {
+      const separate = group.some(edge => edge.relation === 'dependency');
       group.forEach((connector, index) => {
         const from = placed.get(connector.sourceId);
         const to = placed.get(connector.targetId);
-        const geometry = connectorPath(from, to, connector.route, index);
+        const lane = separate ? (index - (group.length - 1) / 2) * 28 : 0;
+        const geometry = connectorPath(from, to, connector.route, index, from.id < to.id ? lane : -lane);
+        const dependency = connector.relation === 'dependency';
         const isSelected = selection?.kind === 'edge' && selection.id === connector.id;
-        const label = connector.name || '커넥터';
+        const caption = [connector.stereotype && `«${connector.stereotype}»`, connector.name].filter(Boolean).join(' ');
+        const label = caption || (dependency ? 'Dependency' : '커넥터');
         const edge = svgElement('g', {
           class: 'sysml-canvas-edge' + (isSelected ? ' is-selected' : ''),
           role: 'button',
           tabindex: '0',
-          'aria-label': label + ' · ' + nodeLabel(from) + ' ↔ ' + nodeLabel(to),
+          'aria-label': label + ' · ' + nodeLabel(from) + (dependency ? ' → ' : ' ↔ ') + nodeLabel(to),
           'aria-pressed': String(isSelected),
           'data-edge-id': connector.id
         });
         const visible = svgElement('path', {
           d: geometry.path, class: 'sysml-canvas-line', stroke: connector.color
         });
+        if (dependency) {
+          const markerId = markerPrefix + '-' + connector.id;
+          const marker = svgElement('marker', {
+            id: markerId, viewBox: '0 0 12 12', markerWidth: 12, markerHeight: 12,
+            refX: 11, refY: 6, orient: 'auto', markerUnits: 'userSpaceOnUse'
+          });
+          marker.append(svgElement('path', {
+            d: connector.arrowhead ? 'M 2 1 L 11 6 L 2 11 Z' : 'M 2 1 L 11 6 L 2 11',
+            fill: connector.arrowhead === 'filled' ? connector.color : connector.arrowhead === 'hollow' ? '#fff' : 'none',
+            stroke: connector.color,
+            'stroke-width': 1.7, 'stroke-linejoin': 'round'
+          }));
+          definitions.append(marker);
+          if (!connector.solid) visible.setAttribute('stroke-dasharray', '7 5');
+          visible.setAttribute('marker-end', `url(#${markerId})`);
+        }
         const hit = svgElement('path', { d: geometry.path, class: 'sysml-canvas-line-hit' });
         edge.append(visible, hit);
-        if (connector.name) {
+        if (caption) {
           const text = svgElement('text', {
             x: geometry.labelX, y: geometry.labelY, class: 'sysml-canvas-edge-label',
             'data-edge-id': connector.id
           });
-          text.textContent = connector.name;
+          text.textContent = caption;
           connectorLabels.append(text);
         }
         connectors.append(edge);
       });
     }
-    lines.replaceChildren(connectors);
+    lines.replaceChildren(definitions, connectors);
     labels.replaceChildren(connectorLabels);
   }
 
-  function drawCard(node) {
+  function drawCard(node, hasFailureChild) {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'sysml-canvas-card';
     card.dataset.nodeId = node.id;
     card.dataset.nodeType = node.type;
+    if (node.undeveloped) card.classList.add('is-undeveloped');
     card.style.setProperty('--node-fill', node.fill);
-    card.style.setProperty('--node-stroke', node.stroke);
+    card.style.setProperty('--node-stroke', hasFailureChild ? '#c52222' : node.stroke);
     card.style.setProperty('--node-ink', textColor(node.fill));
     card.style.width = node.width + 'px';
     card.style.height = node.height + 'px';
@@ -211,7 +270,7 @@ function createSysmlCanvas({
     card.classList.toggle('is-selected', isSelected);
     card.classList.toggle('is-connect-from', linking && connectFrom === node.id);
     card.setAttribute('aria-pressed', String(isSelected));
-    card.setAttribute('aria-label', SysmlModel.types[node.type].label + ' · ' + nodeLabel(node));
+    card.setAttribute('aria-label', nodeTypes[node.type].label + ' · ' + nodeLabel(node));
     card.title = node.text ? nodeLabel(node) + '\n' + node.text : nodeLabel(node);
     setCardPosition(card, node);
     const info = document.createElement('span');
@@ -230,7 +289,7 @@ function createSysmlCanvas({
       card.textContent = { in: '←', out: '→', inout: '↔' }[node.direction];
       card.setAttribute('aria-label', card.title + ' · ' + node.direction);
     } else card.append(kindIcon(node.type), info);
-    if (node.type === 'element') {
+    if (node.type !== 'port') {
       const handle = document.createElement('span');
       handle.className = 'sysml-resize-handle';
       handle.title = '드래그하여 크기 조절';
@@ -251,13 +310,26 @@ function createSysmlCanvas({
     linking = enabled;
     if (switching) drag = null;
     viewport.classList.toggle('is-linking', Boolean(linking));
-    placed = new Map((model?.nodes ?? [])
-      .filter((node) => node.x !== null && node.y !== null)
-      .map((node) => [node.id, node]));
+    const nodes = model?.nodes ?? [];
+    const children = new Map();
+    for (const item of [...nodes, ...(model?.connectors ?? [])]) {
+      if (!children.has(item.parentId)) children.set(item.parentId, []);
+      children.get(item.parentId).push(item.id);
+    }
+    hiddenItems = new Set(nodes.filter(node => node.type === 'port').flatMap(port => children.get(port.id) ?? []));
+    for (const id of hiddenItems) {
+      for (const child of children.get(id) ?? []) hiddenItems.add(child);
+    }
+    const failureParents = new Set(nodes
+      .filter(node => node.type === 'failure' || node.type === 'malfunction')
+      .map(node => node.parentId));
+    placed = new Map(nodes
+      .filter(node => node.x !== null && node.y !== null && !hiddenItems.has(node.id))
+      .map(node => [node.id, node]));
     cardById.clear();
     const nodeCards = document.createDocumentFragment();
     for (const node of placed.values()) {
-      const card = drawCard(node);
+      const card = drawCard(node, failureParents.has(node.id) && ['element', 'port', 'function'].includes(node.type));
       let depth = 0;
       for (let owner = placed.get(node.parentId); owner; owner = placed.get(owner.parentId)) depth++;
       card.style.zIndex = String(depth * 2 + (node.type === 'port' ? 1 : 0));
@@ -265,9 +337,9 @@ function createSysmlCanvas({
     }
     cards.replaceChildren(nodeCards);
     empty.hidden = placed.size > 0;
-    empty.textContent = model
+    empty.textContent = emptyMessage ?? (model
       ? '모델 트리 또는 팔레트 항목을 여기에 끌어오세요.'
-      : '시스템 → SysML에서 모델을 만들거나 선택하세요.';
+      : '시스템 → SysML에서 모델을 만들거나 선택하세요.');
     sizeSurface();
     drawConnectors();
     if (switching) {
@@ -348,8 +420,14 @@ function createSysmlCanvas({
         width: Math.min(limits.maxWidth, Math.max(limits.minWidth, drag.origin.width + dx)),
         height: Math.min(limits.maxHeight, Math.max(limits.minHeight, drag.origin.height + dy))
       };
+      if (drag.origin.type === 'solution') {
+        const size = Math.max(drag.size.width, drag.size.height);
+        drag.size = { width: size, height: size };
+      }
       drag.card.style.width = drag.size.width + 'px';
       drag.card.style.height = drag.size.height + 'px';
+      sizeSurface();
+      drawConnectors();
       return;
     }
     drag.position = limitPosition({ x: drag.origin.x + dx, y: drag.origin.y + dy });
@@ -437,7 +515,7 @@ function createSysmlCanvas({
     } catch {
       return;
     }
-    if (item?.kind === 'tree' || item?.kind === 'palette') {
+    if (dragKinds.includes(item?.kind)) {
       const target = event.target.closest('[data-node-id]')?.dataset.nodeId ?? null;
       onDrop(item, limitPosition(pointAt(event)), target);
     }
@@ -447,7 +525,8 @@ function createSysmlCanvas({
     if (!model || !onCanvasMenu) return;
     event.preventDefault();
     const nodeId = event.target.closest('[data-node-id]')?.dataset.nodeId ?? null;
-    onCanvasMenu(event, nodeId, limitPosition(pointAt(event)));
+    const edgeId = event.target.closest('[data-edge-id]')?.dataset.edgeId ?? null;
+    onCanvasMenu(event, nodeId, limitPosition(pointAt(event)), edgeId);
   });
 
   return { element: viewport, render, getCenter, setCenter, centerOn };

@@ -1,3 +1,5 @@
+const edgeLabels = Object.freeze({ connector: '커넥터', dependency: 'Dependency' });
+
 function sysmlElement(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -28,7 +30,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   const headingGroup = sysmlElement('div', 'sysml-editor-heading');
   headingGroup.append(createSysmlIcon('model'), heading, modelKind);
   const tools = sysmlElement('div', 'sysml-actions');
-  const linkButton = sysmlButton('연결', () => linking ? stopLink() : startLink(), { icon: 'connector' });
+  const linkButton = sysmlButton('연결', () => linking && relation === 'connector' ? stopLink() : startLink(), { icon: 'connector' });
   const arrangeButton = sysmlButton('Auto Arrange', () => {
     edit(SysmlModel.arrange);
     canvas.setCenter(null);
@@ -65,6 +67,8 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   let selection = null;
   let linking = false;
   let connectFrom = null;
+  let connectorParentId = null;
+  let relation = 'connector';
   let message = '';
   let restoreFocus = null;
   let inspectorKey = '';
@@ -75,7 +79,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     kindIcon: createSysmlIcon,
     onDrop: drop,
     onSelect: (item) => {
-      if (linking && !connectFrom && item?.kind === 'node') startLink(item.id);
+      if (linking && !connectFrom && item?.kind === 'node') startLink(item.id, connectorParentId, relation);
       else select(item);
     },
     onMove: (id, { x, y }, targetId) => {
@@ -88,7 +92,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     },
     onConnect: connect,
     onLinkCancelled: () => stopLink(),
-    onCanvasMenu: (event, parentId, point) => showMenu(event, parentId, point)
+    onCanvasMenu: showMenu
   });
   workArea.append(workHeader, canvas.element);
   panes.append(workArea, sidebar);
@@ -106,7 +110,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     canvasStatus.textContent = message || (linking
       ? (from ? `${from.name} → 연결할 항목을 선택하세요.` : '시작 항목을 선택하세요.')
       : `${count}개 배치 · 연결 ${model.connectors.length}개`);
-    linkButton.setAttribute('aria-pressed', String(linking));
+    linkButton.setAttribute('aria-pressed', String(linking && relation === 'connector'));
     arrangeButton.disabled = !count;
     canvas.render({ model, selection, connectFrom, linking });
   }
@@ -127,11 +131,6 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   function createNode(type, requestedParent, point, useRootFallback = false) {
     let parentId = requestedParent;
     if (useRootFallback && !SysmlModel.allowedTypes(model, parentId).includes(type)) parentId = null;
-    if (!SysmlModel.allowedTypes(model, parentId).includes(type)) {
-      const owner = type === 'failure' ? types.element.label : types.function.label;
-      setMessage(`${types[type].label}을 추가할 ${owner} 항목을 선택하거나 그 위에 놓으세요.`);
-      return;
-    }
     const node = edit((draft) => SysmlModel.addNode(draft, type, parentId, point));
     if (node) {
 
@@ -140,7 +139,9 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     }
   }
 
-  function startLink(id = null) {
+  function startLink(id = null, parentId = id, nextRelation = 'connector') {
+    relation = nextRelation;
+    connectorParentId = parentId;
     linking = true;
     connectFrom = id;
     setMessage('');
@@ -149,12 +150,13 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   function stopLink(render = true) {
     linking = false;
     connectFrom = null;
+    connectorParentId = null;
     message = '';
     if (render) paintCanvas();
   }
 
   function connect(sourceId, targetId) {
-    if (SysmlModel.duplicateConnection(model, sourceId, targetId)) {
+    if (SysmlModel.duplicateConnection(model, sourceId, targetId, relation)) {
       stopLink();
       window.alert('두 항목 사이에 이미 커넥터가 있습니다.');
       return;
@@ -167,7 +169,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
           SysmlModel.moveNode(draft, id, point.x, point.y);
         }
       }
-      return SysmlModel.connect(draft, sourceId, targetId);
+      return SysmlModel.connect(draft, sourceId, targetId, connectorParentId, relation);
     });
     stopLink(false);
     select(edge ? { kind: 'edge', id: edge.id } : null);
@@ -182,18 +184,18 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   }
 
   function selectTree(item) {
-    if (linking && item.kind === 'node') {
+    if (linking && item?.kind === 'node') {
       if (connectFrom) connect(connectFrom, item.id);
-      else startLink(item.id);
+      else startLink(item.id, connectorParentId, relation);
       return;
     }
     select(item);
-    if (item.kind === 'node') canvas.centerOn(item.id);
+    if (item?.kind === 'node') canvas.centerOn(item.id);
   }
 
   function drop(item, point, nodeId) {
     if (item.kind === 'palette') {
-      if (item.type === 'connector') startLink(nodeId);
+      if (item.type in edgeLabels) startLink(nodeId, nodeId, item.type);
       else if (types[item.type]) createNode(item.type, nodeId || selectedNodeId(), point, true);
     } else if (item.kind === 'tree' && item.modelId === model.id && model.nodes.some((node) => node.id === item.id)) {
       edit((draft) => SysmlModel.moveNode(draft, item.id, point.x, point.y, nodeId));
@@ -205,12 +207,12 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     return selection?.kind === 'node' ? selection.id : null;
   }
 
-  const paletteTypes = [...Object.keys(types).filter((type) => type !== 'connector'), 'connector'];
+  const paletteTypes = [...Object.keys(types), ...Object.keys(edgeLabels)];
   for (const type of paletteTypes) {
-    const label = type === 'connector' ? '커넥터' : types[type].label;
+    const label = edgeLabels[type] ?? types[type].label;
     const item = sysmlButton(label, () => {
-      if (type === 'connector') startLink(selectedNodeId());
-      else createNode(type, selectedNodeId(), newPoint(types[type]), true);
+      if (type in edgeLabels) startLink(selectedNodeId(), selection?.id ?? null, type);
+      else createNode(type, selection?.id ?? null, newPoint(types[type]), true);
     }, { icon: type });
     item.draggable = true;
     item.title = `${label} 추가 · 클릭하거나 캔버스로 끌어 놓기`;
@@ -230,13 +232,13 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
       button.setAttribute('role', 'menuitem');
       menu.append(button);
     };
-    if (!edgeId) {
-      for (const type of SysmlModel.allowedTypes(model, parentId)) {
-        row(`${types[type].label} 추가`, () => createNode(type, parentId, point), type);
-      }
-      row(parentId ? '이 항목에서 연결' : '커넥터 추가', () => startLink(parentId), 'connector');
-    }
     const itemId = edgeId ?? parentId;
+    for (const type of SysmlModel.allowedTypes(model, itemId)) {
+      row(`${types[type].label} 추가`, () => createNode(type, itemId, point), type);
+    }
+    for (const [type, label] of Object.entries(edgeLabels)) {
+      row(`${label} 추가`, () => startLink(parentId, itemId, type), type);
+    }
     if (itemId) row('항목 삭제', () => deleteItem(itemId));
     else if (!point) {
       row('모델 편집', renameModel);
@@ -273,9 +275,9 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   });
 
   function deleteItem(id) {
-    const node = model.nodes.find((candidate) => candidate.id === id);
-    if (node && model.nodes.some((candidate) => candidate.parentId === id) &&
-        !window.confirm(`‘${node.name}’과 하위 항목을 삭제할까요?`)) return;
+    const item = [...model.nodes, ...model.connectors].find(candidate => candidate.id === id);
+    if (item && [...model.nodes, ...model.connectors].some(candidate => candidate.parentId === id) &&
+        !window.confirm(`‘${item.name || "커넥터"}’과 하위 항목을 삭제할까요?`)) return;
     edit((draft) => SysmlModel.removeItem(draft, id));
   }
 
@@ -283,6 +285,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     const isNode = selection?.kind === 'node';
     const items = isNode ? model.nodes : model.connectors;
     const item = items.find((entry) => entry.id === selection?.id);
+    let parentField = properties.querySelector('[data-parent]');
     const key = item ? `${item.id}:${item.x === null}` : 'empty';
     if (inspectorKey !== key) {
       inspectorKey = key;
@@ -292,10 +295,19 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
         properties.append(sysmlElement('p', 'sysml-prompt', '항목을 선택하면 이름과 스타일을 편집할 수 있습니다.'));
         return;
       }
-      const type = isNode ? item.type : 'connector';
-      const label = sysmlElement('div', 'sysml-property-type', isNode ? types[type].label : '커넥터');
+      const type = isNode ? item.type : item.relation ?? 'connector';
+      const label = sysmlElement('div', 'sysml-property-type', isNode ? types[type].label : edgeLabels[type]);
       label.prepend(createSysmlIcon(type));
       properties.append(label);
+      const parentLabel = sysmlElement('label', 'sysml-field', '상위 항목');
+      parentField = sysmlElement('select');
+      parentField.dataset.parent = '';
+      parentField.addEventListener('change', event => {
+        const parentId = event.currentTarget.value || null;
+        edit(draft => SysmlModel.setParent(draft, item.id, parentId));
+      });
+      parentLabel.append(parentField);
+      properties.append(parentLabel);
       if (isNode) {
         field('이름', 'name', 'text', { maxLength: limits.maxNameLength, required: true });
         field('텍스트', 'text', 'textarea', { maxLength: limits.maxTextLength, rows: 3 });
@@ -332,6 +344,18 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
         const endpoints = sysmlElement('p', 'sysml-edge-endpoints');
         endpoints.dataset.endpoints = '';
         properties.append(endpoints);
+        if (item.relation === 'dependency') {
+          const label = sysmlElement('label', 'sysml-field', 'Stereotype');
+          const stereotype = sysmlElement('select');
+          stereotype.add(new Option('없음', ''));
+          for (const value of ['require', 'use']) stereotype.add(new Option(value, value));
+          stereotype.onchange = () => edit(draft => {
+            draft.connectors.find(edge => edge.id === item.id).stereotype = stereotype.value;
+          });
+          fields.set('stereotype', stereotype);
+          label.append(stereotype);
+          properties.append(label);
+        }
         field('연결선 이름', 'name', 'text', { maxLength: limits.maxNameLength });
         field('선 색상', 'color', 'color');
         const label = sysmlElement('label', 'sysml-field', '선 형태');
@@ -349,6 +373,12 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
       properties.append(sysmlButton('항목 삭제', () => deleteItem(item.id), { className: 'sysml-delete' }));
     }
     if (!item) return;
+    parentField.replaceChildren(new Option('모델 최상위', ''));
+    for (const parent of SysmlModel.parentOptions(model, item.id)) {
+      const typeLabel = types[parent.type]?.label ?? edgeLabels[parent.relation ?? 'connector'];
+      parentField.add(new Option(parent.name ? `${parent.name} · ${typeLabel}` : typeLabel, parent.id));
+    }
+    parentField.value = item.parentId ?? '';
     if (!isNode) {
       const name = (id) => model.nodes.find((node) => node.id === id)?.name ?? '';
       properties.querySelector('[data-endpoints]').textContent = `${name(item.sourceId)} → ${name(item.targetId)}`;
@@ -405,7 +435,8 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
       if (selection && !(selection.kind === 'node' ? model.nodes : model.connectors).some((item) => item.id === selection.id)) {
         selection = null;
       }
-      if (connectFrom && !model.nodes.some((item) => item.id === connectFrom)) stopLink(false);
+      if ((connectFrom && !model.nodes.some(item => item.id === connectFrom)) ||
+          (connectorParentId && !SysmlModel.allowedTypes(model, connectorParentId).length)) stopLink(false);
       heading.textContent = model.name;
       modelKind.textContent = modelKinds[model.kind];
 
@@ -429,30 +460,30 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   };
 }
 
-function renderSysmlNavigationTree({ tree, model, collapsed, selectTree, itemMenu, projectId, selectedId }) {
+function renderSysmlNavigationTree({ tree, model, collapsed, selectTree, itemMenu, projectId, selectedId, systemMenu }) {
     const focused = tree.contains(document.activeElement) ? document.activeElement.dataset.itemId : null;
     tree.replaceChildren();
     const children = new Map();
-    for (const node of model.nodes) {
+    for (const node of [...model.nodes, ...model.connectors]) {
       if (!children.has(node.parentId)) children.set(node.parentId, []);
       children.get(node.parentId).push(node);
     }
-    function itemRow(kind, item, label, depth) {
+    function itemRow(container, kind, item, label, depth) {
       const row = sysmlElement('div', 'sysml-tree-row');
       row.style.setProperty('--tree-depth', depth);
-      const hasChildren = kind === 'node' && children.has(item.id);
+      const hasChildren = children.has(item.id);
       if (hasChildren) {
         const toggle = sysmlButton(collapsed.has(item.id) ? '펼치기' : '접기', () => {
           if (collapsed.has(item.id)) collapsed.delete(item.id);
           else collapsed.add(item.id);
-          renderSysmlNavigationTree({ tree, model, collapsed, selectTree, itemMenu, projectId, selectedId });
+          renderSysmlNavigationTree({ tree, model, collapsed, selectTree, itemMenu, projectId, selectedId, systemMenu });
         }, { className: 'sysml-tree-toggle', iconOnly: true });
         toggle.textContent = collapsed.has(item.id) ? '▸' : '▾';
         toggle.setAttribute('aria-expanded', String(!collapsed.has(item.id)));
         row.append(toggle);
       } else row.append(sysmlElement('span', 'sysml-tree-spacer'));
       const button = sysmlButton(label, () => selectTree({ kind, id: item.id }), {
-        icon: kind === 'node' ? item.type : 'connector', className: 'sysml-tree-item'
+        icon: kind === 'node' ? item.type : item.relation ?? 'connector', className: 'sysml-tree-item'
       });
       button.dataset.itemId = item.id;
       button.title = label;
@@ -470,25 +501,54 @@ function renderSysmlNavigationTree({ tree, model, collapsed, selectTree, itemMen
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openMenu(event);
       });
       row.append(button);
-      tree.append(row);
+      container.append(row);
       if (focused === item.id) button.focus({ preventScroll: true });
     }
-    const stack = (children.get(null) ?? []).map((node) => ({ node, depth: 0 })).reverse();
-    while (stack.length) {
-      const { node, depth } = stack.pop();
-      itemRow('node', node, node.name, depth);
-      if (!collapsed.has(node.id)) {
-        const nested = children.get(node.id) ?? [];
-        for (let i = nested.length - 1; i >= 0; i--) stack.push({ node: nested[i], depth: depth + 1 });
+    const names = new Map(model.nodes.map(node => [node.id, node.name.trim() || types[node.type].label]));
+    function renderItems(container, items) {
+      const stack = items.map(item => ({ item, depth: 0 })).reverse();
+      while (stack.length) {
+        const { item, depth } = stack.pop();
+        const kind = item.type ? 'node' : 'edge';
+        const label = kind === 'node' ? names.get(item.id)
+          : item.name.trim() || `${names.get(item.sourceId)} → ${names.get(item.targetId)}`;
+        const caption = item.stereotype ? `«${item.stereotype}» ${label}` : label;
+        itemRow(container, kind, item, caption, depth);
+        if (!collapsed.has(item.id)) {
+          const nested = children.get(item.id) ?? [];
+          for (let i = nested.length - 1; i >= 0; i--) stack.push({ item: nested[i], depth: depth + 1 });
+        }
       }
     }
-    if (model.connectors.length) {
-      tree.append(sysmlElement('p', 'sysml-tree-section', '연결'));
-      const names = new Map(model.nodes.map((node) => [node.id, node.name]));
-      for (const edge of model.connectors) {
-        itemRow('edge', edge, edge.name || `${names.get(edge.sourceId)} → ${names.get(edge.targetId)}`, 0);
+    const root = children.get(null) ?? [];
+    function renderSection(key, label, items, contextMenu) {
+      const stateKey = `section:${key}`;
+      const content = sysmlElement('div', 'sysml-tree-section-items');
+      const button = sysmlButton(label, () => {
+        if (collapsed.has(stateKey)) collapsed.delete(stateKey);
+        else collapsed.add(stateKey);
+        updateSection();
+      }, { className: 'sysml-tree-section' });
+      const arrow = sysmlElement('span');
+      arrow.setAttribute('aria-hidden', 'true');
+      button.prepend(arrow);
+      function updateSection() {
+        const expanded = !collapsed.has(stateKey);
+        button.setAttribute('aria-expanded', String(expanded));
+        arrow.textContent = expanded ? '▾' : '▸';
+        content.hidden = !expanded || items.length === 0;
       }
+      if (contextMenu) {
+        button.addEventListener('contextmenu', contextMenu);
+        button.addEventListener('keydown', event => {
+          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) contextMenu(event);
+        });
+      }
+      updateSection();
+      tree.append(button, content);
+      renderItems(content, items);
     }
 
-  }
-
+    renderSection('elements', 'Elements', root.filter(item => item.type), systemMenu);
+    renderSection('interfaces', 'Interfaces', root.filter(item => !item.type));
+}

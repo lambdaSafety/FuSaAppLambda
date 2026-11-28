@@ -44,9 +44,19 @@
   color: #436571;
 }
 
+.sysml-icon[data-icon="dependency"] {
+  background: #eee9fa;
+  color: #6d589c;
+}
+
 .sysml-icon[data-icon="model"] {
   background: #e1eeed;
   color: #296761;
+}
+
+.sysml-icon[data-icon="model"] svg {
+  width: 1.1em;
+  height: 1.1em;
 }
 
 .sysml-canvas {

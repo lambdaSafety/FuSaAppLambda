@@ -41,12 +41,21 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   let draftAvailable = true;
 
   const treeStates = new Map();
+  const branchStates = new Map();
   const editor = createSysmlEditor({ edit: editModel, refreshSelection() {
     for (const button of modelLinks.querySelectorAll('[data-item-id]')) {
       button.setAttribute('aria-pressed', String(button.closest('[data-model-id]').dataset.modelId === model()?.id && button.dataset.itemId === editor.selectedId()));
     }
   }, renameModel: () => showModelDialog(model()), removeModel });
   const fta = createFaultTreeEditor({ project, edit, navigate });
+  const req = createReqWorkspace({ project, edit, navigate, renameModel: showReqModelDialog,
+    requestModel() {
+      if (project()) showReqModelDialog();
+      else showProjectDialog(showReqModelDialog);
+    }
+  });
+  const reqBar = createBar(false);
+  req.element.prepend(reqBar.element);
   const ftaBar = createBar(false);
   fta.element.prepend(ftaBar.element);
   const projectBar = createBar(true);
@@ -95,7 +104,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   }
 
   function stamp(value) {
-    return JSON.stringify([value.title, value.activeModelId, value.models, value.diagrams]);
+    return JSON.stringify([value.title, value.activeModelId, value.models, value.diagrams, value.requirements]);
   }
 
   function dirty() {
@@ -251,7 +260,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     }
   }
 
-  function openDialog(title, initialName, kind, onApply) {
+  function openDialog(title, initialName, kind, onApply, modelToDerive = null) {
     if (!store || switching || dialog.open) return;
     focusBeforeDialog = document.activeElement;
     dialogAction = onApply;
@@ -285,6 +294,16 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     const apply = sysmlElement('button', 'sysml-primary', initialName ? '적용' : '만들기');
     apply.type = 'submit';
     controls.append(sysmlButton('취소', () => dialog.close()), apply);
+    if (modelToDerive) {
+      const status = sysmlElement('p');
+      status.hidden = true;
+      status.setAttribute('role', 'status');
+      controls.prepend(sysmlButton('Work Sheet Derive', () => {
+        status.hidden = false;
+        status.textContent = '워크시트 생성 기능은 준비 중입니다.';
+      }));
+      form.append(status);
+    }
     form.append(controls);
     name.addEventListener('input', () => name.setCustomValidity(''));
     form.addEventListener('submit', (event) => {
@@ -306,17 +325,17 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     if (!dialog.open && focusBeforeDialog?.isConnected) focusBeforeDialog.focus({ preventScroll: true });
   });
 
-  function showProjectDialog(addModel = false) {
+  function showProjectDialog(afterCreate = null) {
     openDialog('새 프로젝트', '', null, (name) => {
       if (!beforeReplacingProject()) return;
       openInWorkspace(store.create(name));
-      if (addModel) showModelDialog();
+      afterCreate?.();
     });
   }
 
   function requestNewModel() {
     if (project()) showModelDialog();
-    else showProjectDialog(true);
+    else showProjectDialog(showModelDialog);
   }
 
   function showModelDialog(existing = null) {
@@ -325,6 +344,18 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       if (existing) edit((draft) => SysmlModel.renameModel(SysmlModel.getModel(draft, existing.id), name, kind));
       else edit((draft) => SysmlModel.addModel(draft, name, kind));
       navigate('sysml');
+    }, existing);
+  }
+
+  function showReqModelDialog(existing = null) {
+    openDialog(existing ? 'Req 모델 편집' : 'Req 모델 추가', existing?.title ?? '', null, name => {
+      const id = edit(draft => {
+        if (!existing) return ReqModel.addModel(draft.requirements, name).id;
+        const target = draft.requirements.models.find(item => item.id === existing.id);
+        target.title = name;
+        return target.id;
+      });
+      if (id) req.activate(id);
     });
   }
 
@@ -384,7 +415,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     const status = pendingSave ? 'Supabase에 저장 중…'
       : switching ? '프로젝트를 여는 중…'
         : statusMessage || (current ? (dirty() ? (draftAvailable ? '미저장 · 이 브라우저에 초안 보관' : '미저장') : `저장 완료 · 리비전 ${current.revision}`) : '');
-    for (const bar of [projectBar, editorBar, ftaBar]) {
+    for (const bar of [projectBar, editorBar, ftaBar, reqBar]) {
       bar.title.textContent = current?.title ?? '프로젝트';
       bar.status.textContent = status;
       bar.status.classList.toggle('sysml-status-error', Boolean(statusMessage && !pendingSave && !switching));
@@ -405,6 +436,9 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
 
     ftaBar.undoButton.disabled = editorBar.undoButton.disabled;
     ftaBar.redoButton.disabled = editorBar.redoButton.disabled;
+    reqBar.undoButton.disabled = editorBar.undoButton.disabled;
+    reqBar.redoButton.disabled = editorBar.redoButton.disabled;
+    req.render(current, switching || !store, currentModule === 'requirements');
     fta.render(current, switching, currentModule === 'safety-fta');
     const navigationStamp = JSON.stringify([current?.id, current?.activeModelId, currentModule, current?.models.map(m => [m.id, m.name, m.kind, m.nodes.map(n => [n.id,n.name,n.type,n.parentId,n.x === null]), m.connectors])]);
     if (modelNavigationStamp !== navigationStamp) {
@@ -427,10 +461,25 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
         const open = () => activateModel(item.id);
         const add = sysmlButton('항목 추가', event => { open(); editor.showMenu(event, null); }, { icon: 'plus', iconOnly: true });
         const header = sysmlElement('div', 'sysml-nav-model');
-        header.append(button, add);
+        const toggle = sysmlButton(item.name, () => {
+          branchStates.set(key, !tree.hidden);
+          updateBranch();
+        }, { className: 'sysml-tree-toggle', iconOnly: true });
+        function updateBranch() {
+          tree.hidden = branchStates.get(key) === true;
+          toggle.textContent = tree.hidden ? '▸' : '▾';
+          toggle.setAttribute('aria-expanded', String(!tree.hidden));
+        }
+        updateBranch();
+        header.append(toggle, button, add);
         renderSysmlNavigationTree({
           model: item, tree, projectId: current.id, collapsed: treeStates.get(key),
           selectedId: () => activeModule() === 'sysml' && model()?.id === item.id ? editor.selectedId() : null,
+          systemMenu(event) {
+            event.preventDefault();
+            open();
+            showModelDialog(item);
+          },
           selectTree(selection) { open(); editor.selectTree(selection); },
           itemMenu(event, kind, id) { open(); editor.showMenu(event, kind === 'node' ? id : null, null, kind === 'edge' ? id : null); }
         });
@@ -488,7 +537,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   });
 
   return {
-    navigation, projects, sysml, start, fta,
+    navigation, projects, sysml, start, fta, req,
     render(active, entering) {
       render();
       if (entering && active === 'sysml' && model()) editor.restoreView();
@@ -501,6 +550,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     stop() {
       if (dialog.open) dialog.close();
       treeStates.clear();
+      branchStates.clear();
       store = null;
       history = null;
       records = [];
@@ -525,14 +575,16 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       const key = event.key.toLowerCase();
       const command = (event.ctrlKey || event.metaKey) && !event.altKey;
       if (dialog.open) return false;
-      if (command && key === 's' && project() && ['projects', 'sysml', 'safety-fta'].includes(activeModule())) {
+      if (command && key === 's' && project() && ['projects', 'sysml', 'safety-fta', 'requirements'].includes(activeModule())) {
         if (event.target.matches?.('input, textarea')) event.target.blur();
         void save();
         return true;
       }
-      if (activeModule() !== 'sysml') return false;
-      if (key === 'delete' && !event.target.closest('input, textarea, select, [contenteditable]')) return editor.deleteSelection();
-      if (key === 'escape' && editor.cancel()) return true;
+      if (!['sysml', 'requirements'].includes(activeModule())) return false;
+      if (activeModule() === 'sysml') {
+        if (key === 'delete' && !event.target.closest('input, textarea, select, [contenteditable]')) return editor.deleteSelection();
+        if (key === 'escape' && editor.cancel()) return true;
+      }
       if (!command || !['z', 'y'].includes(key) || event.target.closest('input, textarea, select, [contenteditable]')) return false;
       if (key === 'y' || event.shiftKey) redo();
       else undo();

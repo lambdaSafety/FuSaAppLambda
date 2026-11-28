@@ -15,6 +15,7 @@ const workspaceMenu = [
   {
     title: '시스템',
     icon: '▦',
+    entry: 'sysml',
     children: [
       {
         id: 'sysml',
@@ -36,33 +37,51 @@ const workspaceMenu = [
     ]
   },
   {
+    title: '요구사항',
+    icon: 'requirements',
+    entry: 'requirements',
+    children: [{ id: 'requirements', title: '요구사항' }]
+  },
+  {
     title: '안전 분석',
     icon: '◇',
     children: [
+      { id: 'guidewords', title: '가이드워드' },
       {
-        id: 'fmea',
-        title: 'FMEA',
-        description: '고장 모드별 원인, 영향과 조치를 검토하는 워크시트입니다.',
-        createContent: createFmeaWorksheet,
-        links: ['sysml', 'fmeca', 'fta']
+        title: '워크시트',
+        children: [
+          {
+            id: 'fmea',
+            title: 'FMEA',
+            description: '고장 모드별 원인, 영향과 조치를 검토하는 워크시트입니다.',
+            createContent: createFmeaWorksheet,
+            links: ['sysml', 'fmeca', 'fta']
+          },
+          {
+            id: 'fmeca',
+            title: 'FMECA',
+            description: '고장 모드와 영향 분석을 바탕으로 각 고장의 치명도를 평가합니다.',
+            features: ['FMEA 행과 치명도 평가 연결', '평가 기준, 근거와 우선순위 기록'],
+            links: ['fmea', 'fmeda']
+          },
+          {
+            id: 'fmeda',
+            title: 'FMEDA',
+            description: '하드웨어 고장률과 진단 효과를 고장 모드별로 검토합니다.',
+            features: ['부품 고장률·모드 비율·출처 기록', '진단 커버리지에 따른 검출·미검출 고장률 확인'],
+            links: ['sysml', 'fta', 'mission-profile']
+          }
+        ]
       },
       {
-        id: 'fmeca',
-        title: 'FMECA',
-        description: '고장 모드와 영향 분석을 바탕으로 각 고장의 치명도를 평가합니다.',
-        features: ['FMEA 행과 치명도 평가 연결', '평가 기준, 근거와 우선순위 기록'],
-        links: ['fmea', 'fmeda']
+        title: 'FTA, RBD',
+        children: [
+          { id: 'safety-fta', title: 'FTA', description: '최상위 사건을 일으키는 기본사상의 조합을 고장 트리로 분석합니다.' },
+          { id: 'safety-rbd', title: 'RBD', description: '신뢰성 블록도로 시스템이 기능을 수행하는 데 필요한 구성요소의 관계를 나타냅니다.' }
+        ]
       },
-      {
-        id: 'fmeda',
-        title: 'FMEDA',
-        description: '하드웨어 고장률과 진단 효과를 고장 모드별로 검토합니다.',
-        features: ['부품 고장률·모드 비율·출처 기록', '진단 커버리지에 따른 검출·미검출 고장률 확인'],
-        links: ['sysml', 'fta', 'mission-profile']
-      },
-      { id: 'safety-fta', title: 'FTA', description: '최상위 사건을 일으키는 기본사상의 조합을 고장 트리로 분석합니다.' },
-      { id: 'safety-rbd', title: 'RBD', description: '신뢰성 블록도로 시스템이 기능을 수행하는 데 필요한 구성요소의 관계를 나타냅니다.' },
-      { id: 'safety-markov', title: '마코프', description: '시스템의 정상·고장 상태와 상태 사이의 전이를 모델링합니다.' }
+      { id: 'dfa', title: '종속고장', description: '공통 원인과 연쇄 고장이 영향을 주는 요소와 독립성 가정을 검토합니다.', links: ['requirements', 'safety-fta'] },
+      { id: 'safety-markov', title: '마코프 분석', description: '시스템의 정상·고장 상태와 상태 사이의 전이를 모델링합니다.' }
     ]
   },
   {
@@ -160,17 +179,10 @@ const workspaceMenu = [
       { id: 'markov-analysis', title: '마코프 분석' }
     ]
   },
-  {
-    id: 'requirements',
-    title: '요구사항',
-    description: '요구사항과 검증 기준을 기록하고 시스템 요소 및 분석 결과에 연결합니다.',
-    features: ['요구사항 번호·본문·검증 기준·상태 관리', '시스템 파트와 분석 문서의 연결 확인'],
-    links: ['sysml', 'checklist']
-  },
-  { id: 'dfa', title: '종속고장 분석', description: '공통 원인과 연쇄 고장이 영향을 주는 요소와 독립성 가정을 검토합니다.', links: ['requirements', 'safety-fta'] },
-  { title: '설정', icon: 'settings', children: [
+  { title: '설정 및 도움', icon: 'settings', children: [
     { id: 'mission-profile', title: '미션 프로파일', createContent: createMissionProfile },
-    { id: 'failure-rate-unit', title: '고장률 단위', createContent: createRateSettings }
+    { id: 'failure-rate-unit', title: '고장률 단위', createContent: createRateSettings },
+    { id: 'help', title: '도움말', description: '프로젝트에서 SysML 모델을 만들고 안전 분석 메뉴에서 워크시트와 FTA를 여세요.', links: ['projects', 'sysml', 'fmea', 'safety-fta'] }
   ] }
 ];
 
@@ -229,31 +241,40 @@ function createWorkspace(root) {
     return button;
   }
 
-  function addModule(module, container, groupTitle, group) {
-    const button = moduleButton(module);
-    if (!group) addMenuIcon(button, module.id);
-    container.append(button);
-    if (module.id === 'sysml') container.append(sysmlWorkspace.navigation);
-    if (module.id === 'safety-fta') container.append(sysmlWorkspace.fta.navigation);
-    modules.set(module.id, { ...module, groupTitle, group, button });
+  function addMenuItems(items, container, ancestors = []) {
+    for (const item of items) {
+      if (item.children) {
+        const group = element('details');
+        const links = element('div', '', 'submenu');
+        const summary = element('summary', item.title);
+        if (item.icon) addMenuIcon(summary, item.icon);
+        if (item.entry) summary.addEventListener('click', event => {
+          if (activeId === item.entry) return;
+          event.preventDefault();
+          navigate(item.entry);
+        });
+        group.append(summary, links);
+        container.append(group);
+        groups.push(group);
+        addMenuItems(item.children, links, [...ancestors, { title: item.title, group, summary }]);
+        continue;
+      }
+
+      let button;
+      if (item.id === 'sysml' || item.id === 'requirements') {
+        button = ancestors.at(-1).summary;
+        container.append(item.id === 'sysml' ? sysmlWorkspace.navigation : sysmlWorkspace.req.navigation);
+      } else {
+        button = moduleButton(item);
+        if (!ancestors.length) addMenuIcon(button, item.id);
+        container.append(button);
+      }
+      if (item.id === 'safety-fta') container.append(sysmlWorkspace.fta.navigation);
+      modules.set(item.id, { ...item, ancestors, button });
+    }
   }
 
-  for (const item of workspaceMenu) {
-    if (!item.children) {
-      addModule(item, nav);
-      continue;
-    }
-    const group = element('details');
-    const links = element('div', '', 'submenu');
-    const summary = element('summary', item.title);
-    addMenuIcon(summary, item.icon);
-    group.append(summary, links);
-    nav.append(group);
-    groups.push(group);
-    for (const module of item.children) {
-      addModule(module, links, item.title, group);
-    }
-  }
+  addMenuItems(workspaceMenu, nav);
 
   function setMenuOpen(open) {
     root.classList.toggle('menu-open', open);
@@ -268,23 +289,29 @@ function createWorkspace(root) {
       return;
     }
     if (activeId === 'sysml') sysmlWorkspace.leaveEditor();
-    modules.get(activeId)?.button.removeAttribute('aria-current');
+    modules.get(activeId)?.button?.removeAttribute('aria-current');
     activeId = moduleId;
-    module.button.setAttribute('aria-current', 'page');
-    if (module.group) module.group.open = true;
-    if (moduleId === 'safety-fta') modules.get('sysml').group.open = true;
-    location.textContent = module.groupTitle ? module.groupTitle + ' / ' + module.title : '작업공간';
+    module.button?.setAttribute('aria-current', 'page');
+    for (const { group } of module.ancestors) group.open = true;
+    if (moduleId === 'safety-fta') {
+      for (const { group } of modules.get('sysml').ancestors) group.open = true;
+    }
+    const breadcrumbs = module.ancestors.map(ancestor => ancestor.title);
+    if (breadcrumbs.length && breadcrumbs.at(-1) !== module.title) breadcrumbs.push(module.title);
+    location.textContent = breadcrumbs.join(' / ') || '작업공간';
     title.textContent = module.title;
     description.textContent = module.description;
     description.hidden = !module.description;
     document.title = module.title + ' | 안전분석 공업 수학';
-    root.classList.toggle('workspace-sysml', moduleId === 'sysml');
+    root.classList.toggle('workspace-sysml', ['sysml', 'requirements'].includes(moduleId));
 
     content.replaceChildren();
     if (moduleId === 'projects' || moduleId === 'sysml') {
       content.append(sysmlWorkspace[moduleId]);
     } else if (moduleId === 'safety-fta') {
       content.append(sysmlWorkspace.fta.element);
+    } else if (moduleId === 'requirements') {
+      content.append(sysmlWorkspace.req.element);
     } else if (module.createContent) {
       if (!moduleContent.has(moduleId)) moduleContent.set(moduleId, ['fmea', 'mission-profile', 'failure-rate-unit'].includes(moduleId) ? module.createContent(currentWorkspaceUser) : module.createContent());
       const page = moduleContent.get(moduleId);
@@ -348,7 +375,7 @@ function createWorkspace(root) {
     sysmlWorkspace.stop();
     history.length = 0;
     moduleContent.clear();
-    modules.get(activeId)?.button.removeAttribute('aria-current');
+    modules.get(activeId)?.button?.removeAttribute('aria-current');
     activeId = null;
     for (const group of groups) group.open = false;
     render('projects');

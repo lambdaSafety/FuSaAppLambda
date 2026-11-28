@@ -1,0 +1,93 @@
+.req-content,
+.req-form,
+.req-inspector {
+  min-width: 0;
+  display: grid;
+  gap: .65rem;
+}
+
+.req-toolbar h2 {
+  margin: 0 auto 0 0;
+  overflow-wrap: anywhere;
+}
+
+.req-toolbar [aria-pressed="true"],
+.req-palette [aria-pressed="true"] {
+  background: var(--selected);
+  color: #075750;
+}
+
+.req-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem);
+  gap: .75rem;
+  align-items: start;
+}
+
+.req-canvas {
+  height: clamp(23rem, 63vh, 49rem);
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+}
+
+.req-inspector {
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  padding: .75rem;
+}
+
+.req-inspector h3 { margin: 0; }
+.req-form :is(input, select, textarea) { min-width: 0; }
+.req-form textarea { min-height: 4rem; }
+.req-form input[type="checkbox"] { justify-self: start; }
+.req-links { padding-left: 1.35rem; margin: 0; }
+.req-links button { margin: .2rem; }
+.req-table-wrap { overflow-x: auto; }
+.req-table { border-collapse: collapse; width: 100%; margin-bottom: .75rem; }
+.req-table :is(th, td) { padding: .35rem; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.req-table td :is(input, textarea, select) { width: 100%; min-width: 8rem; }
+.req-table textarea { height: 4rem; }
+
+.req-canvas .sysml-canvas-card {
+  justify-content: center;
+  text-align: center;
+}
+
+.req-canvas .sysml-canvas-card[data-node-type="gsnGoal"] { border-radius: 0; }
+.req-canvas .sysml-canvas-card[data-node-type="context"] { border-radius: 2rem; }
+.req-canvas .sysml-canvas-card:is([data-node-type="solution"], [data-node-type="assumption"], [data-node-type="justification"]) {
+  border-radius: 50%;
+}
+.req-canvas .sysml-canvas-card[data-node-type="strategy"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 1rem;
+}
+.req-canvas .sysml-canvas-card[data-node-type="strategy"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 .55rem;
+  border: 1.5px solid var(--node-stroke);
+  background: var(--node-fill);
+  transform: skew(-13deg);
+  z-index: -1;
+}
+.req-canvas .sysml-canvas-card.is-undeveloped { overflow: visible; }
+.req-canvas .sysml-canvas-card.is-undeveloped::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: calc(50% - 4px);
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--node-stroke);
+  background: white;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+@media (max-width: 62rem) {
+  .req-editor-grid { grid-template-columns: minmax(0, 1fr); }
+}
+

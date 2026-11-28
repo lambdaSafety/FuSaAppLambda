@@ -124,7 +124,7 @@
   border-left: 1px solid var(--line);
 }
 
-#module-nav button[aria-current="page"] {
+#module-nav :is(button, summary)[aria-current="page"] {
   background: var(--selected);
   color: #075750;
   font-weight: 750;

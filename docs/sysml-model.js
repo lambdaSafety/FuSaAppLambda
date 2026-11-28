@@ -1,3 +1,5 @@
+const requirementModel = typeof module !== 'undefined' && module.exports ? require('./req-model.js') : ReqModel;
+
 const SysmlModel = (() => {
   const schemaVersion = 1;
   const limits = Object.freeze({
@@ -12,13 +14,6 @@ const SysmlModel = (() => {
     malfunction: Object.freeze({ label: 'Malfunction', icon: 'ϟ', width: 164, height: 76, fill: '#fff1db', stroke: '#a65f22' })
   });
   const modelKinds = Object.freeze({ system: '시스템', hardware: '하드웨어', software: '소프트웨어', other: '기타' });
-  const childrenByType = {
-    root: ['element', 'port', 'function'],
-    element: ['element', 'port', 'function', 'failure'],
-    function: ['function', 'malfunction'],
-    port: [], failure: [], malfunction: []
-  };
-
   function newId() {
     if (globalThis.crypto.randomUUID) return globalThis.crypto.randomUUID();
 
@@ -78,7 +73,8 @@ const SysmlModel = (() => {
       title: name(title, '프로젝트 이름'),
       revision: 0,
       activeModelId: null,
-      models: []
+      models: [],
+      requirements: requirementModel.blank()
     };
   }
 
@@ -102,8 +98,25 @@ const SysmlModel = (() => {
   }
 
   function allowedTypes(model, parentId = null) {
-    const parentType = parentId === null ? 'root' : model.nodes.find(node => node.id === parentId)?.type;
-    return [...(childrenByType[parentType] ?? [])];
+    return parentId === null || [...model.nodes, ...model.connectors].some(item => item.id === parentId)
+      ? Object.keys(types) : [];
+  }
+
+  function parentOptions(model, itemId) {
+    const items = [...model.nodes, ...model.connectors];
+    const excluded = new Set([itemId]);
+    for (const parentId of excluded) {
+      for (const item of items) if (item.parentId === parentId) excluded.add(item.id);
+    }
+    return items.filter(item => !excluded.has(item.id));
+  }
+
+  function setParent(model, itemId, parentId) {
+    const item = [...model.nodes, ...model.connectors].find(entry => entry.id === itemId);
+    if (!item || (parentId !== null && !parentOptions(model, itemId).some(parent => parent.id === parentId))) return;
+    if (item.parentId !== parentId && item.type === 'port') item.dock = null;
+    item.parentId = parentId;
+    if (item.type === 'element') item.manualParent = true;
   }
 
   function addNode(model, type, parentId = null, point = null) {
@@ -111,6 +124,7 @@ const SysmlModel = (() => {
     const style = types[type];
     const node = {
       id: newId(), type, parentId,
+      ...(type === 'element' && parentId !== null ? { manualParent: true } : {}),
       name: style.label, text: '',
       x: point ? coordinate(point.x) : null,
       y: point ? coordinate(point.y) : null,
@@ -154,7 +168,8 @@ const SysmlModel = (() => {
     if (node.type === 'port') {
       const target = model.nodes.find(item => item.id === targetId && item.type === 'element');
       const currentOwner = model.nodes.find(item => item.id === node.parentId);
-      const owner = currentOwner?.x != null ? currentOwner : target;
+      const owner = node.parentId !== null ? currentOwner
+        : target && parentOptions(model, nodeId).includes(target) ? target : null;
       if (owner?.type === 'element' && owner.x !== null) {
         node.parentId = owner.id;
         let best = Infinity;
@@ -175,26 +190,36 @@ const SysmlModel = (() => {
     Object.assign(node, { x, y });
   }
 
-  function duplicateConnection(model, a, b) {
+  function duplicateConnection(model, a, b, relation = 'connector') {
+    if (relation === 'dependency') {
+      return model.connectors.some(edge => edge.relation === relation && edge.sourceId === a && edge.targetId === b);
+    }
     if (![a, b].every(id => ['element', 'port'].includes(model.nodes.find(node => node.id === id)?.type))) return false;
-    return model.connectors.some(edge =>
-      (edge.sourceId === a && edge.targetId === b) || (edge.sourceId === b && edge.targetId === a));
+    return model.connectors.some(edge => edge.relation !== 'dependency' &&
+      ((edge.sourceId === a && edge.targetId === b) || (edge.sourceId === b && edge.targetId === a)));
   }
 
-  function connect(model, sourceId, targetId) {
+  function connect(model, sourceId, targetId, parentId = null, relation = 'connector') {
     const nodeIds = new Set(model.nodes.map(node => node.id));
     assert(nodeIds.has(sourceId) && nodeIds.has(targetId), '연결할 두 항목을 선택해 주세요.');
-    assert(!duplicateConnection(model, sourceId, targetId), '두 항목 사이에 이미 커넥터가 있습니다.');
-    const connector = { id: newId(), sourceId, targetId, route: 'straight', name: '', color: '#516b7b' };
+    assert(!duplicateConnection(model, sourceId, targetId, relation), '두 항목 사이에 이미 커넥터가 있습니다.');
+    assert(allowedTypes(model, parentId).length, '커넥터의 상위 항목을 확인하세요.');
+    const connector = { id: newId(), sourceId, targetId, parentId, route: 'straight', name: '', color: '#516b7b' };
+    if (relation === 'dependency') Object.assign(connector, { relation, stereotype: '' });
     model.connectors.push(connector);
     return connector;
   }
 
   function removeItem(model, itemId) {
     const children = new Map();
-    for (const node of model.nodes) {
-      if (!children.has(node.parentId)) children.set(node.parentId, []);
-      children.get(node.parentId).push(node.id);
+    function dependOn(id, item) {
+      if (!children.has(id)) children.set(id, []);
+      children.get(id).push(item.id);
+    }
+    for (const item of [...model.nodes, ...model.connectors]) dependOn(item.parentId, item);
+    for (const edge of model.connectors) {
+      dependOn(edge.sourceId, edge);
+      dependOn(edge.targetId, edge);
     }
     const removed = new Set([itemId]);
     for (const item of removed) {
@@ -274,6 +299,7 @@ const SysmlModel = (() => {
         side: ['top', 'right', 'bottom', 'left'].includes(raw.dock.side) ? raw.dock.side : 'right',
         offset: number(raw.dock.offset, 0, 1)
       } : null } : {}),
+      ...(raw.type === 'element' && raw.manualParent === true ? { manualParent: true } : {}),
       parentId: raw.parentId == null ? null : id(raw.parentId),
       name: name(raw.name, '항목 이름'),
       text: text(raw.text ?? '', limits.maxTextLength, '텍스트'),
@@ -289,9 +315,7 @@ const SysmlModel = (() => {
   function validateOwnership(nodes) {
     const checked = new Set();
     for (const node of nodes.values()) {
-      const parent = nodes.get(node.parentId);
-      const parentType = node.parentId === null ? 'root' : parent?.type;
-      assert(childrenByType[parentType]?.includes(node.type), '항목의 상위 요소가 없거나 종류가 올바르지 않습니다.');
+      assert(node.parentId === null || nodes.has(node.parentId), '상위 항목을 찾을 수 없습니다.');
 
       const trail = new Set();
       let current = node;
@@ -304,7 +328,7 @@ const SysmlModel = (() => {
     }
   }
 
-  function normalizeModel(raw) {
+  function normalizeModel(raw, index) {
     assert(raw && Array.isArray(raw.nodes) && Array.isArray(raw.connectors), '모델의 항목 목록이 올바르지 않습니다.');
     const model = {
       id: id(raw.id),
@@ -312,20 +336,50 @@ const SysmlModel = (() => {
       nodes: raw.nodes.map(normalizeNode),
       connectors: []
     };
-    renameModel(model, raw.name, raw.kind ?? 'system');
+    const legacyPlaceholder = 'ㅇㄴㅇㄹㄴㅇㄹ';
+    const kind = raw.kind ?? 'system';
+    const modelName = raw.name?.trim() === legacyPlaceholder ? `${modelKinds[kind]} 모델 ${index + 1}` : raw.name;
+    renameModel(model, modelName, kind);
     const nodeMap = new Map(model.nodes.map(node => [node.id, node]));
     assert(nodeMap.size === model.nodes.length, '같은 항목 ID가 모델에 중복되어 있습니다.');
-    validateOwnership(nodeMap);
+    const occupied = new Set(nodeMap.keys());
+    model.connectors = raw.connectors.map(connector => {
+      assert(connector && nodeMap.has(connector.sourceId) && nodeMap.has(connector.targetId), '커넥터의 연결 대상이 없습니다.');
+      const connectorId = id(connector.id);
+      assert(!occupied.has(connectorId), '같은 항목 ID가 모델에 중복되어 있습니다.');
+      occupied.add(connectorId);
+      return {
+        id: connectorId,
+        ...(connector.relation === 'dependency' ? {
+          relation: 'dependency',
+          stereotype: ['require', 'use'].includes(connector.stereotype) ? connector.stereotype : ''
+        } : {}),
+        parentId: connector.parentId == null ? null : id(connector.parentId),
+        route: connector.route === 'orthogonal' ? 'orthogonal' : 'straight',
+        sourceId: connector.sourceId,
+        targetId: connector.targetId,
+        name: text(connector.name ?? '', limits.maxNameLength, '커넥터 이름').trim(),
+        color: color(connector.color ?? '#516b7b')
+      };
+    });
+    const items = new Map([...nodeMap, ...model.connectors.map(edge => [edge.id, edge])]);
+    validateOwnership(items);
     const boxes = model.nodes.filter(node => node.type === 'element' && node.x !== null)
       .sort((a, b) => a.width * a.height - b.width * b.height);
     for (const box of boxes) {
+      const currentParent = items.get(box.parentId);
+      if (box.manualParent || (currentParent && currentParent.type !== 'element')) continue;
       const container = boxes.find(other => other.width * other.height > box.width * box.height &&
         other.x <= box.x && other.y <= box.y &&
         box.x + box.width <= other.x + other.width && box.y + box.height <= other.y + other.height);
-      if (container) box.parentId = container.id;
+      if (container) {
+        let ancestor = container;
+        while (ancestor && ancestor.id !== box.id) ancestor = items.get(ancestor.parentId);
+        if (!ancestor) box.parentId = container.id;
+      }
       else if (nodeMap.get(box.parentId)?.x != null) box.parentId = null;
     }
-    validateOwnership(nodeMap);
+    validateOwnership(items);
     const ports = new Map();
     for (const node of model.nodes) {
       const owner = nodeMap.get(node.parentId);
@@ -345,21 +399,6 @@ const SysmlModel = (() => {
       });
     }
 
-    const occupied = new Set(nodeMap.keys());
-    model.connectors = raw.connectors.map(connector => {
-      assert(connector && nodeMap.has(connector.sourceId) && nodeMap.has(connector.targetId), '커넥터의 연결 대상이 없습니다.');
-      const connectorId = id(connector.id);
-      assert(!occupied.has(connectorId), '같은 항목 ID가 모델에 중복되어 있습니다.');
-      occupied.add(connectorId);
-      return {
-        id: connectorId,
-        route: connector.route === 'orthogonal' ? 'orthogonal' : 'straight',
-        sourceId: connector.sourceId,
-        targetId: connector.targetId,
-        name: text(connector.name ?? '', limits.maxNameLength, '커넥터 이름').trim(),
-        color: color(connector.color ?? '#516b7b')
-      };
-    });
     return model;
   }
 
@@ -378,6 +417,7 @@ const SysmlModel = (() => {
       title: name(raw.title, '프로젝트 이름'),
       revision,
       activeModelId: ids.has(raw.activeModelId) ? raw.activeModelId : models[0]?.id ?? null,
+      requirements: requirementModel.normalize(raw.requirements),
       diagrams: (raw.diagrams ?? []).map(diagram => ({
         id: id(diagram.id), name: name(diagram.name, 'FTA 이름'),
         connectors: (diagram.connectors ?? []).map(edge => {
@@ -481,7 +521,7 @@ const SysmlModel = (() => {
 
   return Object.freeze({
     schemaVersion, limits, types, modelKinds, newId, createProject, normalizeProject,
-    getModel, addModel, renameModel, removeModel, allowedTypes, addNode, moveNode,
+    getModel, addModel, renameModel, removeModel, allowedTypes, addNode, moveNode, parentOptions, setParent,
     connect, duplicateConnection, removeItem, arrange, arrangeFaultTree, createHistory
   });
 })();

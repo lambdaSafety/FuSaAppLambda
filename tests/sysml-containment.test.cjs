@@ -51,3 +51,57 @@ test('containment follows the smallest enclosing box on move, undo and redo', ()
   history.redo();
   assert.equal(nodes()[2].parentId, null);
 });
+
+test('connectors and all node types can own items across a project round trip', () => {
+  const project = model.createProject();
+  const diagram = model.addModel(project, 'System');
+  const element = model.addNode(diagram, 'element', null, { x: 100, y: 100 });
+  const port = model.addNode(diagram, 'port', element.id);
+  const failure = model.addNode(diagram, 'failure', port.id);
+  const edge = model.connect(diagram, element.id, port.id, failure.id);
+  const malfunction = model.addNode(diagram, 'malfunction', edge.id);
+  const fn = model.addNode(diagram, 'function', malfunction.id);
+  const child = model.addNode(diagram, 'element', fn.id, { x: 120, y: 120 });
+
+  model.setParent(diagram, element.id, child.id);
+  assert.equal(element.parentId, null);
+  const restored = model.normalizeProject(JSON.parse(JSON.stringify(project))).models[0];
+  assert.deepEqual(restored.nodes.map(node => node.parentId), [
+    null, element.id, port.id, edge.id, malfunction.id, fn.id
+  ]);
+  assert.equal(restored.connectors[0].parentId, failure.id);
+
+  model.removeItem(restored, port.id);
+  assert.deepEqual(restored.nodes.map(node => node.id), [element.id]);
+  assert.deepEqual(restored.connectors, []);
+});
+
+test('deleting a connector endpoint also removes items owned by the connector', () => {
+  const project = model.createProject();
+  const diagram = model.addModel(project, 'System');
+  const source = model.addNode(diagram, 'element');
+  const target = model.addNode(diagram, 'port');
+  const edge = model.connect(diagram, source.id, target.id);
+  model.addNode(diagram, 'failure', edge.id);
+
+  model.removeItem(diagram, source.id);
+  assert.deepEqual(diagram.nodes.map(node => node.id), [target.id]);
+  assert.deepEqual(diagram.connectors, []);
+});
+
+test('directed dependencies coexist with connectors and retain their stereotypes', () => {
+  const project = model.createProject();
+  const diagram = model.addModel(project, 'System');
+  const client = model.addNode(diagram, 'element');
+  const supplier = model.addNode(diagram, 'element');
+  const connector = model.connect(diagram, client.id, supplier.id);
+  const use = model.connect(diagram, client.id, supplier.id, client.id, 'dependency');
+  use.stereotype = 'use';
+  const requireEdge = model.connect(diagram, supplier.id, client.id, null, 'dependency');
+  requireEdge.stereotype = 'require';
+
+  assert.equal(model.duplicateConnection(diagram, client.id, supplier.id, 'dependency'), true);
+  assert.equal(model.duplicateConnection(diagram, supplier.id, client.id), true);
+  const restored = model.normalizeProject(JSON.parse(JSON.stringify(project))).models[0];
+  assert.deepEqual(restored.connectors, [connector, use, requireEdge]);
+});
