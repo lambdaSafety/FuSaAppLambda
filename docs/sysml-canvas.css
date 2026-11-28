@@ -22,8 +22,8 @@
 }
 
 .sysml-icon[data-icon="function"] {
-  background: #f5eacb;
-  color: #755013;
+  background: #dceeff;
+  color: #1555a5;
   font-style: italic;
 }
 
@@ -35,8 +35,8 @@
 }
 
 .sysml-icon[data-icon="malfunction"] {
-  background: #f0e4f8;
-  color: #6d347f;
+  background: #b32222;
+  color: #fff;
 }
 
 .sysml-icon[data-icon="connector"] {
@@ -111,8 +111,10 @@
   z-index: 1;
 }
 
+.sysml-canvas-lines { z-index: 2; }
+
 .sysml-canvas-labels {
-  z-index: 2;
+  z-index: 3;
 }
 
 .sysml-canvas-edge {
@@ -237,4 +239,14 @@
   .sysml-canvas {
     min-height: 20rem;
   }
+}
+
+.workspace .sysml-canvas-card[data-node-type="port"] {
+  box-sizing:border-box; min-width:0; padding:0; border-radius:0; display:grid;
+  place-items:center; font: bold 17px/1 sans-serif; z-index:3;
+}
+.sysml-resize-handle {
+  position:absolute; right:0; bottom:0; width:14px; height:14px; cursor:nwse-resize;
+  background:repeating-linear-gradient(135deg,transparent 0 3px,var(--node-stroke) 3px 4px);
+  clip-path:polygon(100% 0,100% 100%,0 100%);
 }

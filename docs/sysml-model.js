@@ -6,7 +6,7 @@ const SysmlModel = (() => {
   });
   const types = Object.freeze({
     element: Object.freeze({ label: '엘리먼트', icon: '◼', width: 156, height: 86, fill: '#e6f2fa', stroke: '#2f688b' }),
-    port: Object.freeze({ label: '포트', icon: '⊡', width: 96, height: 54, fill: '#e1f6f3', stroke: '#258172' }),
+    port: Object.freeze({ label: '포트', icon: '⊡', width: 24, height: 24, fill: '#e1f6f3', stroke: '#258172' }),
     function: Object.freeze({ label: '기능', icon: 'ƒ', width: 148, height: 76, fill: '#eee9fa', stroke: '#6d589c' }),
     failure: Object.freeze({ label: 'Failure Mode', icon: '⚠', width: 164, height: 76, fill: '#fce9e5', stroke: '#b74b49' }),
     malfunction: Object.freeze({ label: 'Malfunction', icon: 'ϟ', width: 164, height: 76, fill: '#fff1db', stroke: '#a65f22' })
@@ -120,15 +120,72 @@ const SysmlModel = (() => {
     return node;
   }
 
-  function moveNode(model, nodeId, x, y) {
+  function portPosition(owner, port, side, offset) {
+    const horizontal = side === 'top' || side === 'bottom';
+    const along = horizontal ? owner.width - port.width : owner.height - port.height;
+    if (horizontal) return {
+      x: owner.x + offset * along,
+      y: side === 'top' ? owner.y - port.height : owner.y + owner.height
+    };
+    return {
+      x: side === 'left' ? owner.x - port.width : owner.x + owner.width,
+      y: owner.y + offset * along
+    };
+  }
+
+  function moveNode(model, nodeId, x, y, targetId = null) {
     const node = model.nodes.find(item => item.id === nodeId);
-    if (node) Object.assign(node, { x: coordinate(x), y: coordinate(y) });
+    if (!node) return;
+    x = coordinate(x);
+    y = coordinate(y);
+    if (node.type === 'element' && node.x !== null) {
+      const moving = new Set([node.id]);
+      for (const parent of moving) {
+        for (const child of model.nodes) {
+          if (child.parentId !== parent) continue;
+          moving.add(child.id);
+          if (child.x !== null) {
+            child.x = coordinate(child.x + x - node.x);
+            child.y = coordinate(child.y + y - node.y);
+          }
+        }
+      }
+    }
+    if (node.type === 'port') {
+      const target = model.nodes.find(item => item.id === targetId && item.type === 'element');
+      const currentOwner = model.nodes.find(item => item.id === node.parentId);
+      const owner = currentOwner?.x != null ? currentOwner : target;
+      if (owner?.type === 'element' && owner.x !== null) {
+        node.parentId = owner.id;
+        let best = Infinity;
+        for (const side of ['right', 'left', 'top', 'bottom']) {
+          const horizontal = side === 'top' || side === 'bottom';
+          const offset = horizontal ? (x - owner.x) / (owner.width - node.width)
+            : (y - owner.y) / (owner.height - node.height);
+          const fraction = Math.min(1, Math.max(0, offset));
+          const point = portPosition(owner, node, side, fraction);
+          const distance = Math.hypot(point.x - x, point.y - y);
+          if (point.x >= 0 && point.y >= 0 && distance < best) {
+            best = distance;
+            node.dock = { side, offset: fraction };
+          }
+        }
+      }
+    }
+    Object.assign(node, { x, y });
+  }
+
+  function duplicateConnection(model, a, b) {
+    if (![a, b].every(id => ['element', 'port'].includes(model.nodes.find(node => node.id === id)?.type))) return false;
+    return model.connectors.some(edge =>
+      (edge.sourceId === a && edge.targetId === b) || (edge.sourceId === b && edge.targetId === a));
   }
 
   function connect(model, sourceId, targetId) {
     const nodeIds = new Set(model.nodes.map(node => node.id));
     assert(nodeIds.has(sourceId) && nodeIds.has(targetId), '연결할 두 항목을 선택해 주세요.');
-    const connector = { id: newId(), sourceId, targetId, name: '', color: '#516b7b' };
+    assert(!duplicateConnection(model, sourceId, targetId), '두 항목 사이에 이미 커넥터가 있습니다.');
+    const connector = { id: newId(), sourceId, targetId, route: 'straight', name: '', color: '#516b7b' };
     model.connectors.push(connector);
     return connector;
   }
@@ -150,7 +207,9 @@ const SysmlModel = (() => {
   }
 
   function arrange(model) {
-    const placed = model.nodes.filter(node => node.x !== null);
+    const visible = new Set(model.nodes.filter(n => n.x !== null && n.type === 'element').map(n => n.id));
+    const placed = model.nodes.filter(node => node.x !== null &&
+      !(['element', 'port'].includes(node.type) && visible.has(node.parentId)));
     if (placed.length === 0) return;
 
     const neighbors = new Map(placed.map(node => [node.id, new Set()]));
@@ -193,8 +252,7 @@ const SysmlModel = (() => {
       let x = 44;
       let rowHeight = 0;
       row.forEach((node, column) => {
-        node.x = x;
-        node.y = y;
+        moveNode(model, node.id, x, y);
         x += columnWidths[column] + 48;
         rowHeight = Math.max(rowHeight, node.height);
       });
@@ -206,16 +264,23 @@ const SysmlModel = (() => {
     assert(raw && typeof raw.type === 'string' && has(types, raw.type), '지원하지 않는 항목 종류입니다.');
     assert((raw.x == null) === (raw.y == null), '캔버스 위치에는 좌표 두 개가 필요합니다.');
     const style = types[raw.type];
+    const port = raw.type === 'port';
+    const direction = raw.direction ?? 'inout';
+    if (port) assert(['in', 'out', 'inout'].includes(direction), '포트 방향을 확인하세요.');
     return {
       id: id(raw.id),
       type: raw.type,
+      ...(port ? { direction, dock: raw.dock ? {
+        side: ['top', 'right', 'bottom', 'left'].includes(raw.dock.side) ? raw.dock.side : 'right',
+        offset: number(raw.dock.offset, 0, 1)
+      } : null } : {}),
       parentId: raw.parentId == null ? null : id(raw.parentId),
       name: name(raw.name, '항목 이름'),
       text: text(raw.text ?? '', limits.maxTextLength, '텍스트'),
       x: raw.x == null ? null : coordinate(raw.x),
       y: raw.y == null ? null : coordinate(raw.y),
-      width: number(raw.width ?? style.width, limits.minWidth, limits.maxWidth),
-      height: number(raw.height ?? style.height, limits.minHeight, limits.maxHeight),
+      width: port ? style.width : number(raw.width ?? style.width, limits.minWidth, limits.maxWidth),
+      height: port ? style.height : number(raw.height ?? style.height, limits.minHeight, limits.maxHeight),
       fill: color(raw.fill ?? style.fill),
       stroke: color(raw.stroke ?? style.stroke)
     };
@@ -251,6 +316,34 @@ const SysmlModel = (() => {
     const nodeMap = new Map(model.nodes.map(node => [node.id, node]));
     assert(nodeMap.size === model.nodes.length, '같은 항목 ID가 모델에 중복되어 있습니다.');
     validateOwnership(nodeMap);
+    const boxes = model.nodes.filter(node => node.type === 'element' && node.x !== null)
+      .sort((a, b) => a.width * a.height - b.width * b.height);
+    for (const box of boxes) {
+      const container = boxes.find(other => other.width * other.height > box.width * box.height &&
+        other.x <= box.x && other.y <= box.y &&
+        box.x + box.width <= other.x + other.width && box.y + box.height <= other.y + other.height);
+      if (container) box.parentId = container.id;
+      else if (nodeMap.get(box.parentId)?.x != null) box.parentId = null;
+    }
+    validateOwnership(nodeMap);
+    const ports = new Map();
+    for (const node of model.nodes) {
+      const owner = nodeMap.get(node.parentId);
+      if (node.type !== 'port' || owner?.type !== 'element' || owner.x === null) continue;
+      if (!ports.has(owner)) ports.set(owner, []);
+      ports.get(owner).push(node);
+    }
+    for (const [owner, group] of ports) {
+      group.forEach((port, index) => {
+        const dock = port.dock ?? { side: 'right', offset: (index + 1) / (group.length + 1) };
+        let point = portPosition(owner, port, dock.side, dock.offset);
+        if (point.x < 0 || point.y < 0) {
+          dock.side = point.x < 0 ? 'right' : 'bottom';
+          point = portPosition(owner, port, dock.side, dock.offset);
+        }
+        Object.assign(port, point);
+      });
+    }
 
     const occupied = new Set(nodeMap.keys());
     model.connectors = raw.connectors.map(connector => {
@@ -260,6 +353,7 @@ const SysmlModel = (() => {
       occupied.add(connectorId);
       return {
         id: connectorId,
+        route: connector.route === 'orthogonal' ? 'orthogonal' : 'straight',
         sourceId: connector.sourceId,
         targetId: connector.targetId,
         name: text(connector.name ?? '', limits.maxNameLength, '커넥터 이름').trim(),
@@ -284,8 +378,66 @@ const SysmlModel = (() => {
       title: name(raw.title, '프로젝트 이름'),
       revision,
       activeModelId: ids.has(raw.activeModelId) ? raw.activeModelId : models[0]?.id ?? null,
+      diagrams: (raw.diagrams ?? []).map(diagram => ({
+        id: id(diagram.id), name: name(diagram.name, 'FTA 이름'),
+        connectors: (diagram.connectors ?? []).map(edge => {
+          const endpoints = [edge.sourceId, edge.targetId];
+          assert(edge.sourceId !== edge.targetId && endpoints.every(key => diagram.nodes.some(n => n.id === key)), 'FTA 연결점을 확인하세요.');
+          return { sourceId: id(edge.sourceId), targetId: id(edge.targetId) };
+        }),
+        nodes: diagram.nodes.map(node => {
+          assert(['event', 'or', 'and', 'voting', 'transfer'].includes(node.type), 'FTA 기호를 확인하세요.');
+          const edges = diagram.connectors ?? [];
+          const hasParent = edges.some(edge => edge.sourceId === node.id);
+          const hasChildren = edges.some(edge => edge.targetId === node.id);
+          const role = hasParent ? (hasChildren ? 'intermediate' : 'basic') : 'top';
+          const probability = node.probability ?? null;
+          const failureRate = node.failureRate ?? null;
+          if (node.type === 'event') {
+            assert(probability === null || (Number.isFinite(probability) && probability >= 0 && probability <= 1), '확률은 0~1 범위로 입력하세요.');
+            assert(failureRate === null || (Number.isFinite(failureRate) && failureRate >= 0), '고장률은 0 이상으로 입력하세요.');
+          }
+          return { id: id(node.id), type: node.type, ...(node.type === 'event' ? { role, probability, failureRate } : {}),
+            fill: color(node.fill ?? '#ffffff'), stroke: color(node.stroke ?? '#184867'), name: name(node.name, '기호 이름'),
+            x: coordinate(node.x), y: coordinate(node.y),
+            source: node.source ? { modelId: id(node.source.modelId), nodeId: id(node.source.nodeId) } : null };
+        })
+      })),
       models
     };
+  }
+
+  function arrangeFaultTree(tree) {
+    const pending = new Map(tree.nodes.map(node => [node.id, 0]));
+    const children = new Map(tree.nodes.map(node => [node.id, []]));
+    for (const { sourceId: child, targetId: parent } of tree.connectors) {
+      pending.set(child, pending.get(child) + 1);
+      children.get(parent).push(child);
+    }
+    const queue = tree.nodes.filter(node => !pending.get(node.id)).map(node => node.id);
+    const depth = new Map(queue.map(id => [id, 0]));
+    for (let index = 0; index < queue.length; index++) {
+      const parent = queue[index];
+      for (const child of children.get(parent)) {
+        depth.set(child, Math.max(depth.get(child) ?? 0, depth.get(parent) + 1));
+        pending.set(child, pending.get(child) - 1);
+        if (!pending.get(child)) queue.push(child);
+      }
+    }
+    assert(queue.length === tree.nodes.length, '순환 연결이 있어 자동 정렬할 수 없습니다.');
+    const rows = new Map();
+    for (const node of tree.nodes) {
+      const level = depth.get(node.id);
+      if (!rows.has(level)) rows.set(level, []);
+      rows.get(level).push(node);
+    }
+    const widest = Math.max(0, ...Array.from(rows.values(), row => row.length));
+    for (const [level, row] of rows) {
+      row.forEach((node, column) => {
+        node.x = 24 + ((widest - row.length) / 2 + column) * 168;
+        node.y = 20 + level * 154;
+      });
+    }
   }
 
   function createHistory(project) {
@@ -330,7 +482,7 @@ const SysmlModel = (() => {
   return Object.freeze({
     schemaVersion, limits, types, modelKinds, newId, createProject, normalizeProject,
     getModel, addModel, renameModel, removeModel, allowedTypes, addNode, moveNode,
-    connect, removeItem, arrange, createHistory
+    connect, duplicateConnection, removeItem, arrange, arrangeFaultTree, createHistory
   });
 })();
 

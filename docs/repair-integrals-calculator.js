@@ -11,7 +11,8 @@ function formatRepairValue(value, digits = 14) {
 
 function drawRepairTrend(container, metric, samples, end) {
   const { field, symbol, unit, title } = metric;
-  const maximum = samples[samples.length - 1][field];
+  const endpoint = samples[samples.length - 1][field];
+  const maximum = Math.max(...samples.map(sample => sample[field]));
   if (!Number.isFinite(maximum)) {
     container.textContent = '임무 시간의 누적값이 숫자 표현 범위를 초과합니다.';
     return;
@@ -25,7 +26,7 @@ function drawRepairTrend(container, metric, samples, end) {
   const yTicks = [...new Set([0, maximum / 2, maximum])];
   const xTicks = [...new Set([0, end / 2, end])];
   container.innerHTML = `
-    <svg viewBox="0 0 310 157" role="img" aria-label="${title}. 0시간부터 ${formatRepairValue(end)}시간까지, 마지막 값 ${formatRepairValue(maximum)} ${unit}.">
+    <svg viewBox="0 0 310 157" role="img" aria-label="${title}. 0시간부터 ${formatRepairValue(end)}시간까지, 마지막 값 ${formatRepairValue(endpoint)} ${unit}.">
       <text x="${left}" y="14">${symbol} (${unit})</text>
       <rect class="repair-plot-area" x="${left}" y="${top}" width="${right-left}" height="${bottom-top}"></rect>
       ${yTicks.map(value => `
@@ -37,7 +38,7 @@ function drawRepairTrend(container, metric, samples, end) {
         <text x="${x(time)}" y="${bottom + 18}" text-anchor="${time > 0 && time === end ? 'end' : 'middle'}">${formatRepairValue(time, 3)}</text>
       `).join('')}
       <path class="repair-curve" d="${path}"></path>
-      <circle class="repair-endpoint" cx="${x(end)}" cy="${y(maximum)}" r="3.5"></circle>
+      <circle class="repair-endpoint" cx="${x(end)}" cy="${y(endpoint)}" r="3.5"></circle>
       <text x="${(left + right) / 2}" y="152" text-anchor="middle">시간 t (h)</text>
     </svg>`;
 }

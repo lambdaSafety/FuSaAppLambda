@@ -7,8 +7,8 @@ function setSysmlDragData(event, item) {
 
 function createSysmlIcon(type) {
   const glyphs = {
-    element: '▣',
-    port: '◇',
+    element: '▭',
+    port: '↔',
     function: 'ƒ',
     failure: '!',
     malfunction: 'ϟ',
@@ -33,6 +33,7 @@ function createSysmlCanvas({
   onDrop,
   onSelect,
   onMove,
+  onResize,
   onConnect,
   onLinkCancelled,
   onCanvasMenu
@@ -82,7 +83,8 @@ function createSysmlCanvas({
   }
 
   function nodePoint(node) {
-    return drag?.id === node.id && drag.moved ? drag.position : node;
+    if (!drag?.position || !drag.group.has(node.id)) return node;
+    return limitPosition({ x: node.x + drag.position.x - drag.origin.x, y: node.y + drag.position.y - drag.origin.y });
   }
 
   function setCardPosition(card, node) {
@@ -117,7 +119,7 @@ function createSysmlCanvas({
     return { x: origin.x + dx / extent, y: origin.y + dy / extent };
   }
 
-  function connectorPath(from, to, index, count) {
+  function connectorPath(from, to, route, index) {
     const a = center(from);
     const b = center(to);
     if (from.id === to.id || (a.x === b.x && a.y === b.y)) {
@@ -125,6 +127,10 @@ function createSysmlCanvas({
       const y = a.y;
       const spread = Math.max(9, Math.min(from.height / 4, 24));
       const reach = 44 + index * 13;
+      if (route === 'orthogonal') return {
+        path: 'M ' + x + ' ' + (y - spread) + ' h ' + reach + ' v ' + (2 * spread) + ' h ' + (-reach),
+        labelX: x + reach, labelY: y - 8
+      };
       return {
         path: 'M ' + x + ' ' + (y - spread) + ' C ' + (x + reach) + ' ' + (y - 2 * spread) +
           ', ' + (x + reach) + ' ' + (y + 2 * spread) + ', ' + x + ' ' + (y + spread),
@@ -132,21 +138,17 @@ function createSysmlCanvas({
         labelY: y - 9
       };
     }
-    const distance = Math.hypot(b.x - a.x, b.y - a.y);
-    const direction = from.id < to.id ? 1 : -1;
-    const offset = (index - (count - 1) / 2) * 36 * direction;
-    const midpoint = {
-      x: (a.x + b.x) / 2 - (b.y - a.y) / distance * offset,
-      y: (a.y + b.y) / 2 + (b.x - a.x) / distance * offset
-    };
-    const start = borderPoint(from, midpoint);
-    const end = borderPoint(to, midpoint);
-    return {
-      path: 'M ' + start.x + ' ' + start.y + ' Q ' + midpoint.x + ' ' + midpoint.y +
-        ', ' + end.x + ' ' + end.y,
-      labelX: (start.x + midpoint.x * 2 + end.x) / 4,
-      labelY: (start.y + midpoint.y * 2 + end.y) / 4 - 8
-    };
+    const start = borderPoint(from, b);
+    const end = borderPoint(to, a);
+    const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2;
+    let path = 'M ' + start.x + ' ' + start.y;
+    if (route === 'orthogonal') {
+      path += Math.abs(a.x - b.x) >= Math.abs(a.y - b.y)
+        ? ' H ' + midX + ' V ' + end.y + ' H ' + end.x
+        : ' V ' + midY + ' H ' + end.x + ' V ' + end.y;
+    } else path += ' L ' + end.x + ' ' + end.y;
+    return { path, labelX: midX, labelY: midY - 8 };
   }
 
   function drawConnectors() {
@@ -163,7 +165,7 @@ function createSysmlCanvas({
       group.forEach((connector, index) => {
         const from = placed.get(connector.sourceId);
         const to = placed.get(connector.targetId);
-        const geometry = connectorPath(from, to, index, group.length);
+        const geometry = connectorPath(from, to, connector.route, index);
         const isSelected = selection?.kind === 'edge' && selection.id === connector.id;
         const label = connector.name || '커넥터';
         const edge = svgElement('g', {
@@ -224,7 +226,16 @@ function createSysmlCanvas({
       text.textContent = node.text;
       info.append(text);
     }
-    card.append(kindIcon(node.type), info);
+    if (node.type === 'port') {
+      card.textContent = { in: '←', out: '→', inout: '↔' }[node.direction];
+      card.setAttribute('aria-label', card.title + ' · ' + node.direction);
+    } else card.append(kindIcon(node.type), info);
+    if (node.type === 'element') {
+      const handle = document.createElement('span');
+      handle.className = 'sysml-resize-handle';
+      handle.title = '드래그하여 크기 조절';
+      card.append(handle);
+    }
     cardById.set(node.id, card);
     return card;
   }
@@ -245,7 +256,13 @@ function createSysmlCanvas({
       .map((node) => [node.id, node]));
     cardById.clear();
     const nodeCards = document.createDocumentFragment();
-    for (const node of placed.values()) nodeCards.append(drawCard(node));
+    for (const node of placed.values()) {
+      const card = drawCard(node);
+      let depth = 0;
+      for (let owner = placed.get(node.parentId); owner; owner = placed.get(owner.parentId)) depth++;
+      card.style.zIndex = String(depth * 2 + (node.type === 'port' ? 1 : 0));
+      nodeCards.append(card);
+    }
     cards.replaceChildren(nodeCards);
     empty.hidden = placed.size > 0;
     empty.textContent = model
@@ -308,7 +325,13 @@ function createSysmlCanvas({
     const id = card.dataset.nodeId;
     const pointer = pointAt(event);
     const origin = placed.get(id);
-    drag = { id, card, origin, pointer, pointerId: event.pointerId, moved: false };
+    const group = new Set([id]);
+    if (origin.type === 'element') {
+      for (const parent of group) {
+        for (const child of placed.values()) if (child.parentId === parent) group.add(child.id);
+      }
+    }
+    drag = { id, card, origin, pointer, group, resize: event.target.classList.contains('sysml-resize-handle'), pointerId: event.pointerId, moved: false };
     card.setPointerCapture(event.pointerId);
   });
 
@@ -319,9 +342,19 @@ function createSysmlCanvas({
     const dy = current.y - drag.pointer.y;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
+    if (drag.resize) {
+      const limits = SysmlModel.limits;
+      drag.size = {
+        width: Math.min(limits.maxWidth, Math.max(limits.minWidth, drag.origin.width + dx)),
+        height: Math.min(limits.maxHeight, Math.max(limits.minHeight, drag.origin.height + dy))
+      };
+      drag.card.style.width = drag.size.width + 'px';
+      drag.card.style.height = drag.size.height + 'px';
+      return;
+    }
     drag.position = limitPosition({ x: drag.origin.x + dx, y: drag.origin.y + dy });
     drag.card.classList.add('is-dragging');
-    setCardPosition(drag.card, drag.origin);
+    for (const id of drag.group) setCardPosition(cardById.get(id), placed.get(id));
     sizeSurface();
     drawConnectors();
   });
@@ -334,9 +367,17 @@ function createSysmlCanvas({
     completed.card.classList.remove('is-dragging');
     if (commit) {
       suppressedClick = completed.id;
-      onMove(completed.id, completed.position);
+      if (completed.resize) onResize(completed.id, completed.size);
+      else {
+        const target = document.elementsFromPoint(event.clientX, event.clientY)
+          .map(hit => hit.closest('[data-node-id]'))
+          .find(card => card && cards.contains(card) && card.dataset.nodeId !== completed.id && card.dataset.nodeType === 'element');
+        onMove(completed.id, completed.position, target?.dataset.nodeId);
+      }
     } else {
-      setCardPosition(completed.card, completed.origin);
+      completed.card.style.width = completed.origin.width + 'px';
+      completed.card.style.height = completed.origin.height + 'px';
+      for (const id of completed.group) setCardPosition(cardById.get(id), placed.get(id));
       sizeSurface();
       drawConnectors();
     }

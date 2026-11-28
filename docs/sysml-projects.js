@@ -9,7 +9,7 @@ function createSysmlProjectStore(client, userId) {
 
   function content(project) {
     return { title: project.title, schemaVersion: project.schemaVersion,
-      activeModelId: project.activeModelId, models: project.models };
+      activeModelId: project.activeModelId, models: project.models, diagrams: project.diagrams };
   }
 
   function sameContent(first, second) {
@@ -216,7 +216,7 @@ function createSysmlProjectStore(client, userId) {
       p_expected_revision: snapshot.revision,
       p_title: snapshot.title,
       p_schema_version: snapshot.schemaVersion,
-      p_payload: { activeModelId: snapshot.activeModelId, models: snapshot.models }
+      p_payload: { activeModelId: snapshot.activeModelId, models: snapshot.models, diagrams: snapshot.diagrams }
     }).single()));
     pendingDrafts(saved, drafts(saved.id));
     writeLocal(lastProjectKey, saved.id);

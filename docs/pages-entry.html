@@ -1,0 +1,8 @@
+---
+layout: none
+permalink: /index.html
+---
+{%- assign version = site.github.build_revision | default: site.time -%}
+{%- capture version_query -%}?v={{ version | url_encode }}{%- endcapture -%}
+{%- capture entry -%}{% include_relative index.html %}{%- endcapture -%}
+{{ entry | replace: '?v=local', version_query }}

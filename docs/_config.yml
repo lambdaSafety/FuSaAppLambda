@@ -1,0 +1,3 @@
+# pages-entry.html renders the local entry point to the published /index.html.
+exclude:
+  - index.html

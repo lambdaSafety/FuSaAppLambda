@@ -1,5 +1,22 @@
-# Local working notes and environment credentials
+# 로컬 작업 메모 및 환경 변수/자격 증명 파일 제외
+# /keep/: 저장소 루트에 있는 keep 폴더 전체 제외 (최상위 폴더만 지정)
 /keep/
+
+# /keepInMind.md: 저장소 루트의 keepInMind.md 파일만 제외 (하위 폴더의 동일 파일명은 영향 없음)
 /keepInMind.md
+
+# .env: 루트 및 하위 폴더의 .env 환경 변수 파일 제외 (API 키·비밀번호 등 민감 정보 유출 방지)
 .env
+
+# .env.*: .env.local, .env.production, .env.development 등 접미사가 붙은 환경 설정 파일 제외
 .env.*
+
+# /*.md: 루트(최상위) 폴더의 모든 .md 파일만 제외 (docs/, tests/ 등 하위 폴더의 .md는 유지)
+/*.md
+
+# 예외 허용 예시: README.md는 GitHub에 남기려면 아래 주석 해제
+# !README.md
+
+# [주의] 이미 Git에 커밋되어 추적 중인 파일은 .gitignore 추가만으로는 자동 제외되지 않음
+# 로컬 파일은 유지한 채 Git 추적에서만 빼려면 아래 명령 실행 후 커밋 필요:
+#   git rm --cached <파일명>   (예: git rm --cached -- "*.md")

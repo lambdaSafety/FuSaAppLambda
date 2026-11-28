@@ -229,7 +229,7 @@
 
 .sysml-panes {
   display: grid;
-  grid-template-columns: clamp(9rem, 17vw, 13rem) minmax(0, 1fr) clamp(10.25rem, 16vw, 14rem);
+  grid-template-columns: minmax(0, 1fr) clamp(10.25rem, 16vw, 14rem);
   height: clamp(27rem, calc(100dvh - 15.5rem), 60rem);
   min-width: 0;
 }
@@ -491,7 +491,7 @@
 
 @media (max-width: 65rem) {
   .sysml-panes {
-    grid-template-columns: 10rem minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(25rem, 58vh) auto;
     height: auto;
   }
@@ -515,7 +515,7 @@
 @media (max-width: 36rem) {
   .sysml-panes {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(5.5rem, auto) minmax(23rem, 54vh) auto;
+    grid-template-rows: minmax(23rem, 54vh) auto;
   }
 
   .sysml-browser {
@@ -524,3 +524,8 @@
     border-bottom: 1px solid var(--line);
   }
 }
+
+.sysml-nav-model { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+#module-nav .sysml-tree-row button { width:auto; min-width:0; }
+#module-nav .sysml-tree-toggle { padding:.15rem; }
+#module-nav .sysml-tree-item { flex:1; padding:.25rem; }

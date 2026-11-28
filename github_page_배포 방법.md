@@ -38,6 +38,16 @@ safetyCalculator는 별도 Vite 프로젝트다. 당시 `gh-pages` 브랜치에 
 
 ## 배포 결과 확인
 
+### FuSaAppLambda 업데이트 후 이전 화면이 보일 때
+
+`main /docs` 배포에서는 Jekyll이 로컬용 `index.html`을 읽고 CSS와 JavaScript 주소의 `?v=local`을 배포 커밋 SHA로 바꾼다. 같은 배포에서는 캐시를 재사용하고 다음 커밋부터 새 주소를 요청한다. 로컬에서 `docs/index.html`을 직접 열 수도 있다. 새 로컬 CSS·JS 또는 정적 JSON 주소를 이 HTML에 추가할 때도 `?v=local`을 붙인다.
+
+1. **Actions**에서 대상 커밋의 Pages 배포가 성공했는지 확인한다. 시크릿 창에서만 새 화면이 보이면 일반 창의 캐시가 원인일 가능성이 높다.
+2. 일반 창에서 **Ctrl + Shift + R**로 HTML까지 강력 새로고침한다. 브라우저가 이전 HTML을 재사용하면 그 안의 자산 주소도 이전 버전을 가리킨다.
+3. 문제가 계속되면 **F12 → Network → Disable cache**를 선택하고 개발자 도구를 연 상태에서 새로고침한다. `workspace.js`를 선택해 **Request URL**의 `?v=` 뒤 값이 배포 커밋 SHA와 일치하는지 확인한다. 확인이 끝나면 **Disable cache**를 해제한다.
+
+### 공통 확인 항목
+
 - **Actions**에서 최신 실행을 열고 배포 단계까지 성공했는지 확인한다. 실패했다면 처음 실패한 단계의 로그를 확인한다.
 - **Visit site**에서 FuSaAppLambda 로그인 화면을 열고 정적 자산이 로드되는지 확인한다. 로그인 후 **시스템 → SysML**을 열어 모델을 편집하고 프로젝트 JSON을 저장한 뒤 다시 연다. [SysML 검증 항목](./GitHubPage_Subbase.md#5-배포-후-확인)
 - Vite로 배포하는 safetyCalculator가 빈 화면을 표시하면 빌드 결과가 게시됐는지와 `base`가 저장소 이름과 일치하는지 확인한다. [Vite 배포 문서](https://vite.dev/guide/static-deploy.html#github-pages)

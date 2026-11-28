@@ -1,6 +1,6 @@
 # 공통 지수 분포 계산 API와 수식
 
-현재 **확률 → 지수 분포**와 **안전분석 → FTA**의 기본사상 계산기가 같은 지수 분포 계산 모듈을 사용한다. 입력 화면과 그래프 표시는 [지수 분포 계산기](./subMenu_01_ExpoDist.md)에 있다.
+현재 **신뢰성 공학 → 지수분포1**와 **신뢰성 공학 → 지수분포2**의 기본사상 계산기가 같은 지수 분포 계산 모듈을 사용한다. 입력 화면과 그래프 표시는 [지수 분포 계산기](./subMenu_01_ExpoDist.md)에 있다.
 
 ## 다른 모듈에서 호출
 
@@ -35,7 +35,7 @@ if (result.ok) {
 
 ## FT 이벤트 계산 API
 
-**확률 → FT 이벤트**와 **안전분석 → FTA → 최상위사상(TLE) 계산기**가 [공통 FT 이벤트 모듈](./docs/ft-event-model.js)을 사용한다. 서로 독립인 비수리 기본 이벤트 두 개의 고장률 `lambda1`, `lambda2`(h⁻¹)와 임무 시간 `t`(h)를 넘긴다. 입력 형식과 범위는 지수 분포 API와 같다.
+**신뢰성 공학 → FT이벤트**와 **신뢰성 공학 → 지수분포2 → 최상위사상(TLE) 계산기**가 [공통 FT 이벤트 모듈](./docs/ft-event-model.js)을 사용한다. 서로 독립인 비수리 기본 이벤트 두 개의 고장률 `lambda1`, `lambda2`(h⁻¹)와 임무 시간 `t`(h)를 넘긴다. 입력 형식과 범위는 지수 분포 API와 같다.
 
 ```js
 const result = ftEvent.calculate({ lambda1: '1e-8', lambda2: '2e-8', t: '1000' });
@@ -50,7 +50,7 @@ if (result.ok) {
 
 ## 수리 이벤트의 누적 적분 API
 
-**확률 → Q(t), W(t)**에서 사용하는 모듈은 처음에 정상인 단일 수리 이벤트를 계산한다. 다른 메뉴도 같은 페이지에서 다음과 같이 호출할 수 있다. 입력 검증과 시점 비가용도 $Q(T)$, 순간 고장 빈도 $\omega(T)$는 기존 지수 분포 수리 모델을 공유한다. [수리 이벤트 적분 모듈](./docs/repair-integrals-model.js)
+**신뢰성 공학 → Q(t), W(t)**에서 사용하는 모듈은 처음에 정상인 단일 수리 이벤트를 계산한다. 다른 메뉴도 같은 페이지에서 다음과 같이 호출할 수 있다. 입력 검증과 시점 비가용도 $Q(T)$, 순간 고장 빈도 $\omega(T)$는 기존 지수 분포 수리 모델을 공유한다. [수리 이벤트 적분 모듈](./docs/repair-integrals-model.js)
 
 ~~~js
 const values = repairIntegrals.calculate({ lambda: '5e-7', mu: '0.01', t: '1000' });
@@ -143,3 +143,50 @@ $$
 | λ = 1e308, t = 1.000000000000000001e-310, τ = 1e-310 | 주기 검사 확률이 경과 시간의 선행 반올림으로 0이 되지 않고 약 1e-20 |
 
 비수리 지수 분포의 확률과 밀도, 수리·주기 검사 모델 및 이중 축 그래프는 다음 자료를 참조한다. [NIST 지수 분포](https://www.itl.nist.gov/div898/handbook/apr/section1/apr161.htm) · [Ansys FTA 확률 모델](https://ansyshelp.ansys.com/public/Views/Secured/medini/v252/en/medini_analyze_ug/fta.html)
+
+## MTTF, MTBF 실습과 FTA 공용 API
+
+세 메뉴는 같은 초기 조건(임무 시작 시 정상)과 모델 선택을 사용한다. 단일 이벤트는 일정한 고장률 λ와 수리율 μ를 사용하고, OR·AND 게이트는 독립인 비수리 지수 이벤트 두 개를 사용한다. 시간 단위는 h, 발생 빈도 단위는 1/h이다.
+
+| 메뉴 | 공용 모델 | 주요 결과 |
+|---|---|---|
+| λ(t), F(t), CFI avg. | `failureIntensity` | 순간 조건부 강도, 누적 고장 확률, 시간 평균 강도 |
+| PFD, PFH | `pfdPfh` | 평균 비가용도, 이 실습에서 정의한 F(T)/T |
+| MTTF, MTBF | `meanFailureTimes` | 첫 고장까지 평균 시간, 정상상태 평균 고장 간격, 유한 임무 유효 MTBF |
+
+생존함수는 $R(t)=1-F(t)$이다. 수리 가능한 시스템에서 $R(t)$는 첫 고장 없이 생존할 확률이고, $1-Q(t)$는 과거 수리 이력을 포함해 현재 정상일 확률이다.
+
+| 모델 | MTTF | MTBF | 유효 MTBF (T > 0, 양의 고장률) |
+|---|---|---|---|
+| 단일 이벤트 | $1/\lambda$ | $1/\lambda+1/\mu$ (양의 수리율) | $1/\lambda$ |
+| 비수리 OR | $1/(\lambda_1+\lambda_2)$ | ∞ (반복 고장 없음) | MTTF와 같다 |
+| 비수리 AND | $1/\lambda_1+1/\lambda_2-1/(\lambda_1+\lambda_2)$ | ∞ (반복 고장 없음) | $(\int_0^T R(t)\,dt)/F(T)$ |
+
+화면의 세 그래프는 각각 누적 생존 면적, 고장 발생 빈도 $w(t)$, 누적 고장 확률 $F(t)$를 그린다. 첫 번째 그래프는 무한 구간 적분인 MTTF에 어떻게 접근하는지 보여 준다. 두 번째 그래프의 장기 빈도가 MTBF의 역수이다. 세 번째 그래프의 끝값은 유효 MTBF의 분모이다. T를 바꾸면 표시 구간과 유효 MTBF를 다시 계산한다.
+
+FTA 호출 예시 (브라우저 DOM 불필요)
+
+```js
+const model = meanFailureTimes.prepare('single', { lambda: 0.001, mu: 0.01, t: 1000 });
+if (model.ok) {
+  const { mttf, mtbf, effective } = model.result; // 1000 h, 1100 h, 1000 h
+  const point = model.sample(500); // truncated, frequency, unreliability 포함
+}
+const gate = meanFailureTimes.calculate('and', { lambda1: 0.001, lambda2: 0.001, t: 1000 });
+```
+
+`prepare`와 `calculate`는 유효하지 않은 입력에 `{ ok: false, fields }`를 반환한다. T = 0이면 유효 MTBF는 `null`이다. T > 0에서 고장이 구조적으로 불가능하면 MTTF와 유효 MTBF는 `Infinity`이다. 수리율이 0이거나 반복 고장이 없으면 정상상태 빈도는 0이며 MTBF 극한은 ∞이다.
+
+## 공학 통계 분포 API
+
+브라우저에서 `DistributionLab.prepare(group, id, values)`를 호출한다. 모수 순서와 입력 범위는 `DistributionLab.groups[group][id].fields`에 정의한다. 입력 오류는 예외로 반환한다. 반환 모델의 `tails(x)`는 [기준값 이하 확률, 기준값 초과 확률]을 반환한다. 수명 모델의 `mean`은 시간(h) 단위다. 비수리 기본사상의 Q(t)는 수명 모델의 tails(t)[0]를 사용할 수 있다.
+
+| group | id |
+|---|---|
+| inference | normal, student, chi, fisher |
+| count | binomial, poisson, hyper, negative |
+| life | exponential, weibull, lognormal, gamma |
+
+준비된 모델의 `density(x)`는 연속분포에서 PDF, 이산분포에서 PMF를 반환한다. 이산분포의 비정수 입력은 질량 0이다. 연속분포에서 원점 밀도가 발산하는 모수 조합은 수학적 우극한 Infinity를 반환하며 차트에서 경계로 표시한다.
+
+studyMeanTest(values,target)는 표본평균, 표준오차, 양측 p값과 95% 구간을 반환한다. studyMarkov(lambda,mu)는 두 장비 정상에서 시작하는 1oo2 모델의 mean(h)과 cdf(t)를 제공한다. 화면의 고장률과 수리율 단위는 1/h다.

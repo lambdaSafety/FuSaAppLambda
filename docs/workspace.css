@@ -267,3 +267,92 @@
     max-width: 100%;
   }
 }
+
+.menu-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.45em;
+  margin-inline-end: .45em;
+  color: #36648b;
+  background: #eaf2f8;
+  border-radius: .25em;
+  font-weight: 700;
+}
+
+.fmea-scroll { max-width: 100%; overflow-x: auto; }
+.fmea-scroll table { border-collapse: collapse; border-spacing: 0; }
+.fmea-scroll th, .fmea-scroll td { border: 1px solid #bdcad5; }
+.fmea-scroll th { padding: .35rem .5rem; background: #edf3f8; white-space: nowrap; }
+.fmea-scroll td { padding: 0; vertical-align: top; cursor: cell; user-select: none; }
+.fmea-scroll td.range-selected { background: #dbeafe; }
+.fmea-scroll td:focus-within { outline: 2px solid #4478ae; outline-offset: -2px; }
+.fmea-scroll :is(textarea, select) {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: .35rem .5rem;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.35;
+}
+.fmea-scroll textarea {
+  min-width: 12rem;
+  height: 3.4em;
+  resize: none;
+}
+.fmea-scroll textarea:not(:focus) { pointer-events: none; }
+.fmea-scroll textarea:focus { user-select: text; }
+.fmea-scroll select { min-width: 5rem; cursor: pointer; }
+.mc-inputs, .mc-charts { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit,minmax(min(100%,18rem),1fr)); margin: 1rem 0; }
+.mc-inputs fieldset { min-width: 0; border: 1px solid var(--line); padding: .75rem; }
+.mc-lab .expo-actions { margin-top: 1rem; }
+.mc-charts figure { margin: 0; min-width: 0; }
+.mc-charts svg { display: block; width: 100%; }
+.mc-charts figcaption { font-size: .85rem; }
+.mc-lab [role=alert] { color: #a12628; }
+
+.dist-lab { max-width: 58rem; }
+.dist-lab form, .dist-fields { display:flex; align-items:end; flex-wrap:wrap; gap:.8rem; }
+.dist-lab label { display:grid; gap:.3rem; font-weight:600; }
+.dist-lab input,.dist-lab select,.dist-lab button { font:inherit; padding:.45rem .65rem; border:1px solid #829a9e; border-radius:.4rem; }
+.dist-lab input { width:9rem; }
+.dist-lab button { background:#076960; color:white; cursor:pointer; }
+.dist-lab figure { margin:1rem 0; padding:.8rem; background:white; border:1px solid #cbd9df; border-radius:.5rem; }
+.dist-lab svg { width:100%; height:auto; }
+.dist-lab [role=alert] { color:#a23329; }
+.dist-formula { overflow-x:auto; }
+
+.dist-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+.dist-pair figure { min-width:0; margin:0; }
+.dist-pair svg text { font-size:12px; }
+@media(max-width:620px){ .dist-pair { grid-template-columns:1fr; } }
+.risk-assessment { max-width:68rem; }
+.risk-inputs { display:flex; flex-wrap:wrap; gap:.8rem; }
+.risk-inputs label { display:grid; gap:.35rem; font-weight:600; }
+.risk-inputs select { max-width:100%; font:inherit; padding:.45rem; }
+.risk-assessment output { display:block; margin:1rem 0; font-weight:700; color:#075b53; }
+.risk-table-scroll { overflow-x:auto; margin:1rem 0; }
+.risk-assessment table { border-collapse:collapse; min-width: min(100%,34rem); }
+.risk-assessment caption { text-align:left; font-weight:700; margin-bottom:.45rem; }
+.risk-assessment th,.risk-assessment td { border:1px solid #cad8da; padding:.4rem .7rem; text-align:center; }
+.risk-assessment th { background:#edf4f3; }
+.risk-assessment .risk-selected { outline:2px solid #076960; outline-offset:-2px; background:#d5ede6; font-weight:700; }
+.mission-editor { display:grid; gap:1.4rem; min-width:0; }
+.mission-editor section { min-width:0; }
+.mission-bar { display:flex; gap:.7rem; flex-wrap:wrap; align-items:center; }
+.mission-scroll { overflow:auto; margin:.6rem 0; }
+.mission-editor table { border-collapse:collapse; width:100%; font-size:.88rem; }
+.mission-editor th,.mission-editor td { border:1px solid #cfdae2; padding:.4rem; }
+.mission-editor th { background:#eff4f7; text-align:left; }
+.mission-editor input:not([type=checkbox]),.mission-editor select { padding:.4rem; border:1px solid #bdcbd3; border-radius:4px; }
+.mission-editor td input { width:9rem; }
+.mission-editor td input[type=number] { width:6rem; }
+.mission-editor output { display:block; padding:.8rem; background:#edf5f7; font-variant-numeric:tabular-nums; }
+.mission-editor label { display:inline-flex; align-items:center; gap:.35rem; margin:.3rem; }
+.menu-icon svg { display:block; }

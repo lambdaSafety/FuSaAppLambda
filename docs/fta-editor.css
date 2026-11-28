@@ -1,0 +1,25 @@
+.fta-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(130px,22%); border:1px solid #cbd5df; min-height:480px; }
+.fta-viewport { overflow:auto; height:62vh; min-height:480px; background:#fff; }
+.fta-board { position:relative; width:100%; height:100%; background-image:radial-gradient(#d4dce4 1px, transparent 1px); background-size:20px 20px; }
+.fta-palette { display:flex; flex-direction:column; gap:8px; padding:14px; border-left:1px solid #cbd5df; overflow:auto; max-height:62vh; }
+
+.fta-node { position:absolute; width:128px; height:128px; pointer-events:none; touch-action:none; outline:none; color:#184867; fill:white; stroke:currentColor; stroke-width:2; }
+.fta-node path { pointer-events:visiblePainted; cursor:grab; }
+.fta-node text { pointer-events:none; }
+.fta-node:focus-visible, .fta-node[aria-pressed="true"] { stroke:#008278; stroke-width:3; fill:#e0f5f2; }
+.fta-lines { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; fill:none; stroke:#526e80; stroke-width:2; }
+.fta-caption { position:absolute; max-width:95px; overflow-wrap:anywhere; pointer-events:none; font-size:.8rem; }
+.fta-palette button { display:flex; align-items:center; gap:8px; text-align:left; }
+.fta-palette svg { width:48px; height:48px; flex:none; fill:white; stroke:currentColor; stroke-width:2; }
+.fta-palette svg { width:32px; height:32px; }
+.fta-layout svg text { fill:currentColor; stroke:none; font: bold 17px sans-serif; text-anchor:middle; }
+.fta-role { display:grid; gap:5px; margin-top:12px; }
+
+.fta-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.fta-toolbar h2 { margin-right:auto; }
+.fta-toolbar span { font-variant-numeric:tabular-nums; }
+.fta-layout .fta-inner-label { font:5px sans-serif; fill:#152935; paint-order:stroke; stroke:white; stroke-width:.55px; pointer-events:none; }
+.fta-node text:not(.fta-inner-label) { transform:translateY(-12px); font-size:9px; }
+.fta-inline-name { position:absolute; width:96px; box-sizing:border-box; text-align:center; }
+.fta-role label { display:grid; gap:3px; }
+.fta-role input { min-width:0; width:100%; }
