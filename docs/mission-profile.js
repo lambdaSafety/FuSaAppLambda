@@ -60,31 +60,30 @@ function missionButton(title,click) {
   return button;
 }
 const rateUnits = {'FIT':1e9,'고장 / 10⁶ h':1e6,'고장 / h':1};
-function rateUnit(user) {
-  const value=localStorage.getItem('weblambda.rate-unit.'+user);
+function rateUnit(user, projectData) {
+  const value=projectData.read('rateUnit') ?? localStorage.getItem('weblambda.rate-unit.'+user);
   return Object.hasOwn(rateUnits,value) ? value : 'FIT';
 }
-function createRateSettings(user) {
+function createRateSettings(user, projectData) {
   const panel=missionNode('section');
   const label=missionNode('label','미션 프로파일 환산 고장률 단위 ');
   const select=missionNode('select');
   const note=missionNode('p','1 FIT = 10⁻⁹ /h = 0.001 고장 / 10⁶ h');
   for (const unit of Object.keys(rateUnits)) select.add(new Option(unit,unit));
-  select.value=rateUnit(user);
+  select.value=rateUnit(user, projectData);
   select.onchange=()=>{
-    try {localStorage.setItem('weblambda.rate-unit.'+user,select.value);}
-    catch {note.textContent='단위를 저장할 수 없습니다.';}
+    if (!projectData.write('rateUnit', select.value)) {note.textContent='단위를 저장할 수 없습니다.';}
   };
   label.append(select); panel.append(label,note); return panel;
 }
-function createMissionProfile(user) {
+function createMissionProfile(user, projectData) {
   const key='weblambda.mission.v1.'+user;
-  const state=JSON.parse(localStorage.getItem(key) || 'null') || {profiles:profileExamples(),selected:0};
+  const stored=projectData.read('mission') ?? JSON.parse(localStorage.getItem(key) || 'null');
+  const state=stored ? structuredClone(stored) : {profiles:profileExamples(),selected:0};
   const panel=missionNode('section');
   panel.className='mission-editor';
   function save() {
-    try {localStorage.setItem(key,JSON.stringify(state));}
-    catch {window.alert('미션 프로파일을 저장할 수 없습니다.');}
+    if (!projectData.write('mission', state)) {window.alert('미션 프로파일을 저장할 수 없습니다.');}
   }
   function draw() {
     const p=state.profiles[state.selected];
@@ -161,7 +160,7 @@ function createMissionProfile(user) {
       label.append(input);rates.append(label);return input;
     });
     function rateResult(){
-      const {on,off}=missionTotals(p),unit=rateUnit(user);
+      const {on,off}=missionTotals(p),unit=rateUnit(user, projectData);
       result.textContent=inputs.every(x=>x.validity.valid) && on<=1+1e-12 && !panel.querySelector('table input:invalid')
         ? (rateUnits[unit]*(on*inputs[0].valueAsNumber+Math.max(0,off)*inputs[1].valueAsNumber)).toPrecision(6)+' '+unit : '—';
     }

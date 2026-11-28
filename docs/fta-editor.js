@@ -1,4 +1,4 @@
-function createFaultTreeEditor({ project, edit, navigate }) {
+function createFaultTreeEditor({ project, edit, navigate, showModelDialog }) {
   const el = sysmlElement;
   const navigation = el('div', 'sysml-navigation');
   const links = el('div', 'sysml-model-links');
@@ -11,12 +11,19 @@ function createFaultTreeEditor({ project, edit, navigate }) {
   const heading = el('h2');
   layout.append(viewport, palette);
   const toolbar = el('div', 'fta-toolbar');
+  const modelSettings = sysmlButton('모델 편집', () => showModelDialog(diagram(project())));
+  const missionLabel = el('span', 'fta-mission', `Mission Time ${SysmlModel.faultTreeMissionTime} h`);
   const arrange = sysmlButton('Auto-rearrange', () => edit(p => SysmlModel.arrangeFaultTree(diagram(p))));
+  const evaluate = sysmlButton('FTA Evaluation', runEvaluation);
+  const evaluationStatus = el('div', 'fta-evaluation-status');
+  evaluationStatus.setAttribute('role', 'status');
+  const cutSetGrid = el('section', 'fta-cutsets');
+  cutSetGrid.hidden = true;
   const scaleLabel = el('span', '', '100%');
   const remove = sysmlButton('삭제', removeSelected);
   remove.title = '선택한 기호와 연결선 삭제 (Delete)';
-  toolbar.append(heading, arrange, remove, scaleLabel);
-  element.append(toolbar, layout);
+  toolbar.append(heading, modelSettings, missionLabel, arrange, evaluate, remove, scaleLabel);
+  element.append(toolbar, evaluationStatus, layout, cutSetGrid);
   let zoom = 1;
   viewport.addEventListener('wheel', event => {
     if (!event.ctrlKey) return;
@@ -40,7 +47,64 @@ function createFaultTreeEditor({ project, edit, navigate }) {
   let connecting = false;
   let from = null;
   let visibleTree;
+  let evaluation;
+  let visibleCutSets;
   const roles = { basic: '기본 이벤트', intermediate: '중간 이벤트', top: '최상위 이벤트' };
+  function evaluationKey(p, tree) {
+    return JSON.stringify([p.id, tree.id, tree.missionTime, tree.connectors,
+      tree.nodes.map(({ id, type, name, threshold, probabilityModel, probability, derivedPercent,
+        exponentialMode, failureRate, repairRate, inspectionInterval }) => [id, type, name, threshold,
+        probabilityModel, probability, derivedPercent, exponentialMode, failureRate, repairRate, inspectionInterval])]);
+  }
+  function resultLabel(result) {
+    return `확률 ${result.probability.toExponential(5)} · Frequency f(t) ${result.frequency.toExponential(5)} 1/h`;
+  }
+  function runEvaluation() {
+    const p = project();
+    const tree = diagram(p);
+    if (locked || !tree?.nodes.length) return;
+    const key = evaluationKey(p, tree);
+    try {
+      const results = evaluateFaultTree(tree);
+      const tops = tree.nodes.filter(node => node.role === 'top');
+      const cutSets = faultTreeCutSets(tree, tops, results);
+      evaluation = { key, results, cutSets, message: tops.length
+        ? tops.map(node => `${node.name} · ${resultLabel(results.get(node.id))}`).join('\n')
+        : '최상위 이벤트(TLE)를 연결하세요.' };
+    } catch (error) {
+      evaluation = { key, message: error.message };
+    }
+    render(p, false, true);
+  }
+  function renderCutSets(groups) {
+    if (visibleCutSets === groups) return;
+    visibleCutSets = groups;
+    cutSetGrid.replaceChildren();
+    cutSetGrid.hidden = !groups?.length;
+    if (cutSetGrid.hidden) return;
+    cutSetGrid.append(el('h3', '', '최소 Cut Set 분석'));
+    for (const group of groups) {
+      const table = el('table');
+      table.createCaption().textContent = group.name;
+      const header = table.createTHead().insertRow();
+      for (const title of ['Order', 'Cut Set 집합', 'Cut Set 확률']) {
+        const cell = el('th', '', title);
+        cell.scope = 'col';
+        header.append(cell);
+      }
+      const body = table.createTBody();
+      const rows = document.createDocumentFragment();
+      for (const cutSet of group.rows) {
+        const row = el('tr');
+        row.insertCell().textContent = cutSet.order;
+        row.insertCell().textContent = `{${cutSet.names.join(', ')}}`;
+        row.insertCell().textContent = cutSet.probability.toExponential(5);
+        rows.append(row);
+      }
+      body.append(rows);
+      cutSetGrid.append(table);
+    }
+  }
   function symbol(type, role = 'top', showTails = true) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 64 64');
@@ -86,7 +150,7 @@ function createFaultTreeEditor({ project, edit, navigate }) {
     return p?.diagrams.find(item => item.id === selected) ?? p?.diagrams[0];
   }
   function appendDiagram(p, name) {
-    const item = { id: SysmlModel.newId(), name, nodes: [] };
+    const item = { id: SysmlModel.newId(), name, missionTime: SysmlModel.faultTreeMissionTime, nodes: [], connectors: [] };
     selected = item.id;
     p.diagrams.push(item);
     return item;
@@ -100,6 +164,13 @@ function createFaultTreeEditor({ project, edit, navigate }) {
   function place(data, x, y, parentId = null, dropOnParent = false) {
     if (locked || !project()) return;
     edit(p => {
+      if (data.source) {
+        const model = p.models.find(item => item.id === data.source.modelId);
+        const original = model?.nodes.find(node => node.id === data.source.nodeId);
+        if (!original || !['element', 'failure'].includes(original.type)) return;
+        const tree = diagram(p) ?? appendDiagram(p, 'FTA 1');
+        return SysmlModel.addFaultTreeSource(tree, model, original, x, y, parentId);
+      }
       const tree = diagram(p) ?? appendDiagram(p, 'FTA 1');
       if (data.move) {
         const node = tree.nodes.find(n => n.id === data.move);
@@ -107,9 +178,6 @@ function createFaultTreeEditor({ project, edit, navigate }) {
         return;
       }
       if (!Object.hasOwn(labels, data.type)) return;
-      const source = data.source;
-      const original = source && p.models.find(m => m.id === source.modelId)?.nodes.find(n => n.id === source.nodeId && n.type === 'element');
-      if (source && !original) return;
       const parent = tree.nodes.find(n => n.id === parentId);
       if (parent && dropOnParent) {
         x = parent.x;
@@ -118,7 +186,7 @@ function createFaultTreeEditor({ project, edit, navigate }) {
       }
       const id = SysmlModel.newId();
       if (parent) tree.connectors.push({ sourceId: id, targetId: parent.id });
-      tree.nodes.push({ id, type: data.type, name: original?.name ?? labels[data.type], source, x, y });
+      tree.nodes.push({ id, type: data.type, name: labels[data.type], x, y });
     });
   }
   function draggable(button, data) {
@@ -129,7 +197,7 @@ function createFaultTreeEditor({ project, edit, navigate }) {
     };
   }
   canvas.ondragover = event => {
-    if ((event.dataTransfer.types.includes(mime) || event.dataTransfer.types.includes(sysmlDragType))) event.preventDefault();
+    if (!locked && (event.dataTransfer.types.includes(mime) || event.dataTransfer.types.includes(sysmlDragType))) event.preventDefault();
   };
   canvas.ondrop = event => {
     if (!(event.dataTransfer.types.includes(mime) || event.dataTransfer.types.includes(sysmlDragType))) return;
@@ -138,13 +206,13 @@ function createFaultTreeEditor({ project, edit, navigate }) {
     try {
       if (event.dataTransfer.types.includes(sysmlDragType)) {
         const item = JSON.parse(event.dataTransfer.getData(sysmlDragType));
-        if (item.kind !== 'tree' || item.type !== 'element' || item.projectId !== project()?.id) return;
+        if (item.kind !== 'tree' || !['element', 'failure'].includes(item.type) || item.projectId !== project()?.id) return;
         data = { type: 'event', source: { modelId: item.modelId, nodeId: item.id }, dx: 0, dy: 0 };
       } else data = JSON.parse(event.dataTransfer.getData(mime));
     } catch { return; }
     const rect = canvas.getBoundingClientRect();
     const targetId = event.target.closest?.('.fta-node')?.dataset.nodeId;
-    const parentId = data.source ? null : targetId ?? selectedNode;
+    const parentId = targetId ?? (data.source ? null : selectedNode);
     place(data, Math.max(0, (event.clientX - rect.left) / zoom - data.dx), Math.max(0, (event.clientY - rect.top) / zoom - data.dy), parentId, Boolean(targetId));
   };
   function render(p, switching, active) {
@@ -154,6 +222,14 @@ function createFaultTreeEditor({ project, edit, navigate }) {
     links.replaceChildren();
     for (const item of p?.diagrams ?? []) {
       const button = sysmlButton(item.name, () => { selected = item.id; navigate('safety-fta'); });
+      const openModelDialog = event => {
+        event.preventDefault();
+        if (!locked) showModelDialog(item);
+      };
+      button.addEventListener('contextmenu', openModelDialog);
+      button.addEventListener('keydown', event => {
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openModelDialog(event);
+      });
       if (active && item === tree) button.setAttribute('aria-current', 'true');
       links.append(button);
     }
@@ -164,6 +240,11 @@ function createFaultTreeEditor({ project, edit, navigate }) {
     }
     visibleTree = tree?.id;
     if (!active) return;
+    if (evaluation && (!tree || evaluation.key !== evaluationKey(p, tree))) evaluation = null;
+    evaluationStatus.textContent = evaluation?.message ?? '';
+    renderCutSets(evaluation?.cutSets);
+    modelSettings.disabled = locked || !tree;
+    evaluate.disabled = locked || !tree?.nodes.length;
     arrange.disabled = locked || !tree?.nodes.length;
     canvas.style.minWidth = Math.max(300, ...(tree?.nodes ?? []).map(n => n.x + 240)) + 'px';
     canvas.style.minHeight = Math.max(480, ...(tree?.nodes ?? []).map(n => n.y + 240)) + 'px';
@@ -241,26 +322,57 @@ function createFaultTreeEditor({ project, edit, navigate }) {
         panel.append(label);
       }
       if (inspected.type === 'event') {
-        for (const [key, title] of [['probability', '확률 (0~1)'], ['failureRate', '고장률 λ (1/h)']]) {
-          const label = el('label', '', title);
-          const input = el('input');
-          input.type = 'number';
-          input.min = '0';
-          if (key === 'probability') input.max = '1';
-          input.step = 'any';
-          input.placeholder = '미입력';
-          input.value = inspected[key] ?? '';
-          input.onchange = () => {
-            if (!input.reportValidity()) {
-              input.value = inspected[key] ?? '';
-              return;
-            }
-            const value = input.value === '' ? null : input.valueAsNumber;
-            edit(p => { diagram(p).nodes.find(n => n.id === inspected.id)[key] = value; });
-          };
-          label.append(input);
-          panel.append(label);
+        if (!tree.connectors.some(edge => edge.targetId === inspected.id)) {
+          selectField('probabilityModel', '확률 모델', SysmlModel.faultTreeProbabilityModels);
+          if (inspected.probabilityModel === 'fixed') {
+            numericField('probability', '확률 (0~1)', '0', 'any', '1');
+          } else if (inspected.probabilityModel === 'derived') {
+            numericField('derivedPercent', 'Safety mechanism 확률 (%)', '0', 'any', '100');
+          } else {
+            selectField('exponentialMode', '지수분포 모드', SysmlModel.faultTreeExponentialModes);
+            numericField('failureRate', '고장률 λ (1/h)', '0', 'any');
+            if (inspected.exponentialMode === 'repair') numericField('repairRate', '수리율 μ (1/h)', '0', 'any');
+            if (inspected.exponentialMode === 'monitoring') numericField('inspectionInterval', '검사 주기 τ (h)', '0', 'any');
+          }
         }
+        const result = evaluation?.results?.get(inspected.id);
+        if (result) panel.append(el('output', 'fta-inspector-result', resultLabel(result)));
+      }
+      if (inspected.type === 'voting') numericField('threshold', 'VOTING 기준 (m-of-n)', '1', '1');
+      function selectField(key, title, options) {
+        const label = el('label', '', title);
+        const select = el('select');
+        for (const [value, caption] of Object.entries(options)) {
+          const option = el('option', '', caption);
+          option.value = value;
+          select.append(option);
+        }
+        select.value = inspected[key];
+        select.onchange = () => updateField(key, select.value);
+        label.append(select);
+        panel.append(label);
+      }
+      function updateField(key, value) {
+        edit(p => { diagram(p).nodes.find(n => n.id === inspected.id)[key] = value; });
+      }
+      function numericField(key, title, min, step, max) {
+        const label = el('label', '', title);
+        const input = el('input');
+        input.type = 'number';
+        input.min = min;
+        input.step = step;
+        if (max !== undefined) input.max = max;
+        input.required = true;
+        input.value = inspected[key] ?? '';
+        input.onchange = () => {
+          if (!input.reportValidity()) {
+            input.value = inspected[key] ?? '';
+            return;
+          }
+          updateField(key, input.valueAsNumber);
+        };
+        label.append(input);
+        panel.append(label);
       }
       palette.append(panel);
     }
@@ -318,7 +430,14 @@ function createFaultTreeEditor({ project, edit, navigate }) {
       const caption = document.createElementNS(ns, 'text');
       caption.classList.add('fta-inner-label');
       const title = document.createElementNS(ns, 'title');
-      title.textContent = node.name;
+      const result = node.type === 'event' && evaluation?.results?.get(node.id);
+      title.textContent = result ? `${node.name}\n${resultLabel(result)}` : node.name;
+      const resultBadge = result ? el('div', 'fta-node-result') : null;
+      if (resultBadge) {
+        resultBadge.append(el('div', '', `확률 ${result.probability.toExponential(5)}`),
+          el('div', '', `f(t) ${result.frequency.toExponential(5)} 1/h`));
+        button.setAttribute('aria-label', `${button.getAttribute('aria-label')} · ${resultLabel(result)}`);
+      }
       const available = node.type === 'transfer' ? 22 : node.role === 'top' || node.role === 'intermediate' ? 50 : 33;
       const chars = Array.from(node.name);
       const maxChars = Math.floor(available / 5);
@@ -337,6 +456,10 @@ function createFaultTreeEditor({ project, edit, navigate }) {
       function position(x, y) {
         button.style.left = x + 'px';
         button.style.top = y + 'px';
+        if (resultBadge) {
+          resultBadge.style.left = (x + 64) + 'px';
+          resultBadge.style.top = (y + 106) + 'px';
+        }
         positions.set(node.id, { x, y });
       }
       position(node.x, node.y);
@@ -390,6 +513,7 @@ function createFaultTreeEditor({ project, edit, navigate }) {
         };
       };
       canvas.append(button);
+      if (resultBadge) canvas.append(resultBadge);
     }
   }
   return { element, navigation, render };

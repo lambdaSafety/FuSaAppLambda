@@ -3,19 +3,22 @@ const expoModes = [
     id: 'non-repair',
     label: '비수리 (Non-repair)',
     explanation: '임무 시간까지 한 번이라도 고장날 확률입니다.',
-    formula: '<mn>1</mn><mo>−</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>λ</mi><mi>t</mi></mrow></msup>'
+    formula: '<mn>1</mn><mo>−</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>λ</mi><mi>t</mi></mrow></msup>',
+    frequency: '<mi>λ</mi><msup><mi>e</mi><mrow><mo>−</mo><mi>λ</mi><mi>t</mi></mrow></msup>'
   },
   {
     id: 'repair',
     label: '수리 (Repair)',
     explanation: '초기에 정상이고 수리 후 정상으로 복귀할 때, 시점 t에 고장 상태일 확률입니다.',
-    formula: '<mfrac><mi>λ</mi><mrow><mi>λ</mi><mo>+</mo><mi>μ</mi></mrow></mfrac><mo>·</mo><mo>(</mo><mn>1</mn><mo>−</mo><msup><mi>e</mi><mrow><mo>−</mo><mo>(</mo><mi>λ</mi><mo>+</mo><mi>μ</mi><mo>)</mo><mi>t</mi></mrow></msup><mo>)</mo>'
+    formula: '<mfrac><mi>λ</mi><mrow><mi>λ</mi><mo>+</mo><mi>μ</mi></mrow></mfrac><mo>·</mo><mo>(</mo><mn>1</mn><mo>−</mo><msup><mi>e</mi><mrow><mo>−</mo><mo>(</mo><mi>λ</mi><mo>+</mo><mi>μ</mi><mo>)</mo><mi>t</mi></mrow></msup><mo>)</mo>',
+    frequency: '<mi>λ</mi><mo>[</mo><mn>1</mn><mo>−</mo><mi>P</mi><mo>(</mo><mi>t</mi><mo>)</mo><mo>]</mo>'
   },
   {
     id: 'monitoring',
     label: '주기 검사 (Monitoring)',
     explanation: '고장을 발견하면 즉시 복구합니다. 양의 검사 시점 t = nτ에서는 검사 직전 값을 사용하고, 검사 직후에는 확률이 0으로 돌아갑니다. τ = 0이면 유효 경과 시간 a를 0으로 둡니다.',
     formula: '<mn>1</mn><mo>−</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>λ</mi><mi>a</mi><mo>(</mo><mi>t</mi><mo>,</mo><mi>τ</mi><mo>)</mo></mrow></msup>',
+    frequency: '<mi>λ</mi><msup><mi>e</mi><mrow><mo>−</mo><mi>λ</mi><mi>a</mi><mo>(</mo><mi>t</mi><mo>,</mo><mi>τ</mi><mo>)</mo></mrow></msup>',
     extra: '<p>유효 경과 시간 a는 t 또는 τ가 0이면 0, 양의 검사 시점이면 τ, 그 외에는 t를 τ로 나눈 나머지입니다.</p>'
   }
 ];
@@ -85,11 +88,12 @@ function createExpoCalculator({ selectModel = false } = {}) {
         <p>${mode.explanation}</p>
         <div class="expo-formula">
           <math display="block"><mi>P</mi><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo>${mode.formula}</math>
+          <math display="block"><mi>f</mi><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo>${mode.frequency}</math>
         </div>
         ${mode.extra ?? ''}
         <dl class="expo-values">
           <div><dt>확률 P(t)</dt><dd>${format(probability)}</dd></div>
-          <div><dt>Frequency (1/h)</dt><dd>${format(frequency)}</dd></div>
+          <div><dt>Frequency f(t) (1/h)</dt><dd>${format(frequency)}</dd></div>
         </dl>
         <div class="expo-chart"></div>
       `;

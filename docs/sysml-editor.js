@@ -36,7 +36,8 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     canvas.setCenter(null);
   }, { icon: 'arrange' });
   arrangeButton.title = '캔버스에 배치된 항목 자동 정렬';
-  tools.append(linkButton, arrangeButton, sysmlButton('모델 편집', renameModel));
+  tools.append(linkButton, arrangeButton, sysmlButton('모델 편집', renameModel),
+    sysmlButton('모델 삭제', removeModel, { className: 'sysml-delete' }));
   toolbar.append(headingGroup, tools);
 
   const panes = sysmlElement('div', 'sysml-panes');
@@ -73,7 +74,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
   let restoreFocus = null;
   let inspectorKey = '';
 
-  const fields = new Map();
+  const fields = [];
 
   const canvas = createSysmlCanvas({
     kindIcon: createSysmlIcon,
@@ -285,12 +286,14 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
     const isNode = selection?.kind === 'node';
     const items = isNode ? model.nodes : model.connectors;
     const item = items.find((entry) => entry.id === selection?.id);
+    const ownsDistribution = isNode && SysmlModel.ownsFailureDistribution(item);
+    const modes = ownsDistribution ? SysmlModel.ownedFailureModes(model, item) : [];
     let parentField = properties.querySelector('[data-parent]');
-    const key = item ? `${item.id}:${item.x === null}` : 'empty';
+    const key = item ? JSON.stringify([item.id, item.x === null, modes.map(mode => [mode.id, mode.name])]) : 'empty';
     if (inspectorKey !== key) {
       inspectorKey = key;
       properties.replaceChildren();
-      fields.clear();
+      fields.length = 0;
       if (!item) {
         properties.append(sysmlElement('p', 'sysml-prompt', '항목을 선택하면 이름과 스타일을 편집할 수 있습니다.'));
         return;
@@ -311,6 +314,31 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
       if (isNode) {
         field('이름', 'name', 'text', { maxLength: limits.maxNameLength, required: true });
         field('텍스트', 'text', 'textarea', { maxLength: limits.maxTextLength, rows: 3 });
+        if (ownsDistribution) {
+          field('고장률 예측 (FIT)', 'predictedFit', 'number', { min: 0, step: 'any', placeholder: '미입력' });
+          const distribution = sysmlElement('fieldset', 'sysml-failure-distribution');
+          distribution.append(sysmlElement('legend', '', '고장 분포'));
+          if (modes.length === 0) {
+            distribution.append(sysmlElement('p', 'sysml-prompt', '직접 소유한 고장 모드가 없습니다.'));
+          } else {
+            for (const mode of modes) {
+              field(`${mode.name} (%)`, 'failurePercent', 'number',
+                { min: 0, max: 100, step: 'any', placeholder: '미입력' }, distribution, mode.id);
+            }
+            const summary = sysmlElement('p', 'sysml-prompt');
+            summary.dataset.distributionSummary = '';
+            summary.setAttribute('role', 'status');
+            distribution.append(summary);
+          }
+          properties.append(distribution);
+        }
+        if (item.type === 'failure') {
+          const label = sysmlElement('label', 'sysml-field', '계산된 고장률 (FIT)');
+          const result = sysmlElement('output');
+          result.dataset.failureFit = '';
+          label.append(result);
+          properties.append(label);
+        }
         if (item.type === 'port') {
           const label = sysmlElement('label', 'sysml-field', '포트 방향');
           const direction = sysmlElement('select');
@@ -320,7 +348,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
             direction.append(option);
           }
           direction.onchange = () => edit(draft => { draft.nodes.find(node => node.id === item.id).direction = direction.value; });
-          fields.set('direction', direction);
+          fields.push({ input: direction, property: 'direction', targetId: item.id });
           label.append(direction);
           properties.append(label);
         } else {
@@ -352,7 +380,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
           stereotype.onchange = () => edit(draft => {
             draft.connectors.find(edge => edge.id === item.id).stereotype = stereotype.value;
           });
-          fields.set('stereotype', stereotype);
+          fields.push({ input: stereotype, property: 'stereotype', targetId: item.id });
           label.append(stereotype);
           properties.append(label);
         }
@@ -366,7 +394,7 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
           route.append(option);
         }
         route.onchange = () => edit(draft => { draft.connectors.find(edge => edge.id === item.id).route = route.value; });
-        fields.set('route', route);
+        fields.push({ input: route, property: 'route', targetId: item.id });
         label.append(route);
         properties.append(label);
       }
@@ -383,33 +411,49 @@ function createSysmlEditor({ edit, renameModel, removeModel, refreshSelection })
       const name = (id) => model.nodes.find((node) => node.id === id)?.name ?? '';
       properties.querySelector('[data-endpoints]').textContent = `${name(item.sourceId)} → ${name(item.targetId)}`;
     }
-    for (const [property, input] of fields) {
-      if (document.activeElement !== input) input.value = item[property];
+    const fieldItems = new Map([item, ...modes].map(node => [node.id, node]));
+    for (const { input, property, targetId } of fields) {
+      if (document.activeElement !== input) input.value = fieldItems.get(targetId)[property] ?? '';
+    }
+    if (modes.length) {
+      const total = modes.reduce((sum, mode) => sum + (mode.failurePercent ?? 0), 0);
+      const complete = modes.every(mode => mode.failurePercent != null);
+      const balanced = Math.abs(total - 100) < 1e-9;
+      const summary = properties.querySelector('[data-distribution-summary]');
+      summary.textContent = `합계 ${total.toLocaleString('ko-KR', { maximumFractionDigits: 9 })}%` +
+        (complete && balanced ? '' : ' · 모든 비율을 입력해 합계를 100%로 맞추세요.');
+    }
+    if (isNode && item.type === 'failure') {
+      const fit = SysmlModel.failureModeFit(model, item);
+      properties.querySelector('[data-failure-fit]').value = fit === null ? '미산정' : String(fit);
     }
 
-    function field(label, property, type, attributes = {}, container = properties) {
+    function field(label, property, type, attributes = {}, container = properties, targetId = item.id) {
       const wrapper = sysmlElement('label', 'sysml-field', label);
       const input = sysmlElement(type === 'textarea' ? 'textarea' : 'input');
       if (type !== 'textarea') input.type = type;
       Object.assign(input, attributes);
       input.addEventListener('change', () => {
-        const current = (isNode ? model.nodes : model.connectors).find((entry) => entry.id === item.id);
+        const current = (isNode ? model.nodes : model.connectors).find((entry) => entry.id === targetId);
         if (!current) return;
-        const value = type === 'number' ? input.valueAsNumber : type === 'textarea' ? input.value : input.value.trim();
-        if (!input.checkValidity() || (attributes.required && !value) || (type === 'number' && !Number.isFinite(value))) {
-          input.value = current[property];
+        const nullable = property === 'predictedFit' || property === 'failurePercent';
+        const value = nullable && input.value === '' ? null :
+          type === 'number' ? input.valueAsNumber : type === 'textarea' ? input.value : input.value.trim();
+        if (!input.checkValidity() || (attributes.required && !value) ||
+            (type === 'number' && value !== null && !Number.isFinite(value))) {
+          input.value = current[property] ?? '';
           return;
         }
         if (value === current[property]) return;
         edit((draft) => {
           const entries = isNode ? draft.nodes : draft.connectors;
-          entries.find((entry) => entry.id === item.id)[property] = value;
+          entries.find((entry) => entry.id === targetId)[property] = value;
         });
-        input.value = (isNode ? model.nodes : model.connectors).find((entry) => entry.id === item.id)[property];
+        input.value = (isNode ? model.nodes : model.connectors).find((entry) => entry.id === targetId)[property] ?? '';
       });
       wrapper.append(input);
       container.append(wrapper);
-      fields.set(property, input);
+      fields.push({ input, property, targetId });
     }
   }
 

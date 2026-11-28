@@ -382,6 +382,26 @@
   gap: .4rem;
 }
 
+.sysml-failure-distribution {
+  display: grid;
+  gap: .45rem;
+  min-width: 0;
+  margin: 0;
+  padding: .5rem;
+  border: 1px solid #a3b8c0;
+  border-radius: .3rem;
+  overflow-wrap: anywhere;
+}
+
+.sysml-failure-distribution legend {
+  font-size: .75rem;
+  font-weight: 660;
+}
+
+.sysml-failure-distribution .sysml-prompt {
+  margin: 0;
+}
+
 .sysml-field {
   display: grid;
   gap: .25rem;

@@ -74,11 +74,16 @@ const ReqModel = (() => {
     assert(queue.length === entities.length, '분해 또는 GSN 지원 링크가 순환합니다.');
   }
 
-  function normalize(raw = blank()) {
+  function isPlaceholderName(value) {
+    if (typeof value !== 'string') return false;
     const legacyPlaceholder = 'ㅇㄴㅇㄹㄴㅇㄹ';
+    return value.replace(/[\s*\u200B-\u200D\uFEFF]/gu, '').normalize('NFKC') === legacyPlaceholder.normalize('NFKC');
+  }
+
+  function normalize(raw = blank()) {
     const models = raw.models.map((model, index) => ({
       id: identifier(model.id),
-      title: title(model.title?.trim() === legacyPlaceholder ? `요구사항 모델 ${index + 1}` : model.title),
+      title: title(isPlaceholderName(model.title) ? `요구사항 모델 ${index + 1}` : model.title),
       diagrams: model.diagrams.map(diagram => ({
         id: identifier(diagram.id), title: title(diagram.title), type: diagram.type === 'gsn' ? 'gsn' : 'trace',
         layout: diagram.layout.map(box => {
@@ -214,7 +219,7 @@ const ReqModel = (() => {
     return issues;
   }
 
-  return { kinds, domains, domainFields, gsnKinds, linkTypes, statuses, blank, normalize, canLink, hierarchy, isGsn,
+  return { kinds, domains, domainFields, gsnKinds, linkTypes, statuses, blank, normalize, isPlaceholderName, canLink, hierarchy, isGsn,
     addModel, addDiagram, addEntity, place, link, update, remove, validate };
 })();
 

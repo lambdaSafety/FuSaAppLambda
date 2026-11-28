@@ -1,7 +1,18 @@
 const requirementModel = typeof module !== 'undefined' && module.exports ? require('./req-model.js') : ReqModel;
 
+const markovProjectModel = typeof module !== 'undefined' && module.exports ? require('./markov-model.js') : MarkovModel;
+
 const SysmlModel = (() => {
   const schemaVersion = 1;
+  const faultTreeMissionTime = 1000;
+  const faultTreeProbabilityModels = Object.freeze({
+    fixed: 'Fixed probability',
+    derived: 'Time independent derived probability',
+    exponential: 'Exponential distribution'
+  });
+  const faultTreeExponentialModes = Object.freeze({
+    'non-repair': 'Non-repair', repair: 'Repair', monitoring: 'Monitoring'
+  });
   const limits = Object.freeze({
     minWidth: 72, maxWidth: 800, minHeight: 40, maxHeight: 600,
     maxCoordinate: 250000, maxNameLength: 120, maxTextLength: 4000
@@ -70,11 +81,12 @@ const SysmlModel = (() => {
     return {
       schemaVersion,
       id: newId(),
-      title: name(title, '프로젝트 이름'),
+      title: projectTitle(title),
       revision: 0,
       activeModelId: null,
       models: [],
-      requirements: requirementModel.blank()
+      requirements: requirementModel.blank(),
+      workspaceData: {}
     };
   }
 
@@ -115,8 +127,30 @@ const SysmlModel = (() => {
     const item = [...model.nodes, ...model.connectors].find(entry => entry.id === itemId);
     if (!item || (parentId !== null && !parentOptions(model, itemId).some(parent => parent.id === parentId))) return;
     if (item.parentId !== parentId && item.type === 'port') item.dock = null;
+    if (item.parentId !== parentId && item.type === 'failure') item.failurePercent = null;
     item.parentId = parentId;
     if (item.type === 'element') item.manualParent = true;
+  }
+
+  function ownsFailureDistribution(node) {
+    return node?.type === 'element' || node?.type === 'port';
+  }
+
+  function ownedFailureModes(model, owner) {
+    return model.nodes.filter(node => node.type === 'failure' && node.parentId === owner.id);
+  }
+
+  function failureModeFit(model, mode) {
+    if (mode.type !== 'failure' || mode.failurePercent == null) return null;
+    const owner = model.nodes.find(node => node.id === mode.parentId);
+    if (!ownsFailureDistribution(owner) || owner.predictedFit == null) return null;
+    return owner.predictedFit * (mode.failurePercent / 100);
+  }
+
+  function optionalFailureValue(value, max, message) {
+    if (value == null) return null;
+    assert(Number.isFinite(value) && value >= 0 && value <= max, message);
+    return value;
   }
 
   function addNode(model, type, parentId = null, point = null) {
@@ -126,6 +160,8 @@ const SysmlModel = (() => {
       id: newId(), type, parentId,
       ...(type === 'element' && parentId !== null ? { manualParent: true } : {}),
       name: style.label, text: '',
+      ...(type === 'element' || type === 'port' ? { predictedFit: null } : {}),
+      ...(type === 'failure' ? { failurePercent: null } : {}),
       x: point ? coordinate(point.x) : null,
       y: point ? coordinate(point.y) : null,
       width: style.width, height: style.height, fill: style.fill, stroke: style.stroke
@@ -295,13 +331,19 @@ const SysmlModel = (() => {
     return {
       id: id(raw.id),
       type: raw.type,
+      ...(ownsFailureDistribution(raw) ? {
+        predictedFit: optionalFailureValue(raw.predictedFit, Infinity, '예측 고장률은 0 FIT 이상으로 입력하세요.')
+      } : {}),
+      ...(raw.type === 'failure' ? {
+        failurePercent: optionalFailureValue(raw.failurePercent, 100, '고장 비율은 0~100% 범위로 입력하세요.')
+      } : {}),
       ...(port ? { direction, dock: raw.dock ? {
         side: ['top', 'right', 'bottom', 'left'].includes(raw.dock.side) ? raw.dock.side : 'right',
         offset: number(raw.dock.offset, 0, 1)
       } : null } : {}),
       ...(raw.type === 'element' && raw.manualParent === true ? { manualParent: true } : {}),
       parentId: raw.parentId == null ? null : id(raw.parentId),
-      name: name(raw.name, '항목 이름'),
+      name: name(requirementModel.isPlaceholderName(raw.name) ? types[raw.type].label : raw.name, '항목 이름'),
       text: text(raw.text ?? '', limits.maxTextLength, '텍스트'),
       x: raw.x == null ? null : coordinate(raw.x),
       y: raw.y == null ? null : coordinate(raw.y),
@@ -336,9 +378,8 @@ const SysmlModel = (() => {
       nodes: raw.nodes.map(normalizeNode),
       connectors: []
     };
-    const legacyPlaceholder = 'ㅇㄴㅇㄹㄴㅇㄹ';
     const kind = raw.kind ?? 'system';
-    const modelName = raw.name?.trim() === legacyPlaceholder ? `${modelKinds[kind]} 모델 ${index + 1}` : raw.name;
+    const modelName = requirementModel.isPlaceholderName(raw.name) ? `${modelKinds[kind]} 모델 ${index + 1}` : raw.name;
     renameModel(model, modelName, kind);
     const nodeMap = new Map(model.nodes.map(node => [node.id, node]));
     assert(nodeMap.size === model.nodes.length, '같은 항목 ID가 모델에 중복되어 있습니다.');
@@ -383,6 +424,7 @@ const SysmlModel = (() => {
     const ports = new Map();
     for (const node of model.nodes) {
       const owner = nodeMap.get(node.parentId);
+      if (node.type === 'failure' && !ownsFailureDistribution(owner)) node.failurePercent = null;
       if (node.type !== 'port' || owner?.type !== 'element' || owner.x === null) continue;
       if (!ports.has(owner)) ports.set(owner, []);
       ports.get(owner).push(node);
@@ -402,6 +444,35 @@ const SysmlModel = (() => {
     return model;
   }
 
+  function normalizeWorkspaceData(raw) {
+    raw ??= {};
+    const data = {};
+    if (Array.isArray(raw.fmea) && raw.fmea.every(row => row && typeof row === 'object' && !Array.isArray(row))) {
+      data.fmea = structuredClone(raw.fmea);
+    }
+    if (raw.mission && Array.isArray(raw.mission.profiles) && raw.mission.profiles.length &&
+        raw.mission.profiles.every(profile => profile && Array.isArray(profile.phases) && Array.isArray(profile.cycles)) &&
+        Number.isInteger(raw.mission.selected) && raw.mission.selected >= 0 && raw.mission.selected < raw.mission.profiles.length) {
+      data.mission = structuredClone(raw.mission);
+    }
+    if (raw.markov !== undefined) data.markov = markovProjectModel.normalize(raw.markov);
+    if (['FIT', '고장 / 10⁶ h', '고장 / h'].includes(raw.rateUnit)) data.rateUnit = raw.rateUnit;
+    return data;
+  }
+
+  function projectTitle(value) {
+    return name(requirementModel.isPlaceholderName(value) ? '안전 분석 프로젝트' : value, '프로젝트 이름');
+  }
+
+  function contentStamp(project) {
+    const { title, activeModelId, models, diagrams, requirements, workspaceData } = project;
+    // PostgreSQL jsonb can return object keys in a different order. Array order still matters.
+    return JSON.stringify([title, activeModelId, models, diagrams, requirements, workspaceData], (key, value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.keys(value).sort().map(field => [field, value[field]]));
+    });
+  }
+
   function normalizeProject(raw) {
     assert(raw && raw.schemaVersion === schemaVersion, '지원하지 않는 프로젝트 파일 버전입니다.');
     assert(Array.isArray(raw.models), '프로젝트에 모델 목록이 없습니다.');
@@ -414,12 +485,14 @@ const SysmlModel = (() => {
     return {
       schemaVersion,
       id: raw.id,
-      title: name(raw.title, '프로젝트 이름'),
+      title: projectTitle(raw.title),
       revision,
       activeModelId: ids.has(raw.activeModelId) ? raw.activeModelId : models[0]?.id ?? null,
       requirements: requirementModel.normalize(raw.requirements),
-      diagrams: (raw.diagrams ?? []).map(diagram => ({
-        id: id(diagram.id), name: name(diagram.name, 'FTA 이름'),
+      workspaceData: normalizeWorkspaceData(raw.workspaceData),
+      diagrams: (raw.diagrams ?? []).map((diagram, index) => ({
+        id: id(diagram.id), name: name(requirementModel.isPlaceholderName(diagram.name) ? `FTA ${index + 1}` : diagram.name, 'FTA 이름'),
+        missionTime: faultTreeMissionTime,
         connectors: (diagram.connectors ?? []).map(edge => {
           const endpoints = [edge.sourceId, edge.targetId];
           assert(edge.sourceId !== edge.targetId && endpoints.every(key => diagram.nodes.some(n => n.id === key)), 'FTA 연결점을 확인하세요.');
@@ -431,20 +504,78 @@ const SysmlModel = (() => {
           const hasParent = edges.some(edge => edge.sourceId === node.id);
           const hasChildren = edges.some(edge => edge.targetId === node.id);
           const role = hasParent ? (hasChildren ? 'intermediate' : 'basic') : 'top';
-          const probability = node.probability ?? null;
-          const failureRate = node.failureRate ?? null;
-          if (node.type === 'event') {
-            assert(probability === null || (Number.isFinite(probability) && probability >= 0 && probability <= 1), '확률은 0~1 범위로 입력하세요.');
-            assert(failureRate === null || (Number.isFinite(failureRate) && failureRate >= 0), '고장률은 0 이상으로 입력하세요.');
-          }
-          return { id: id(node.id), type: node.type, ...(node.type === 'event' ? { role, probability, failureRate } : {}),
-            fill: color(node.fill ?? '#ffffff'), stroke: color(node.stroke ?? '#184867'), name: name(node.name, '기호 이름'),
+          const threshold = node.threshold ?? 1;
+          if (node.type === 'voting') assert(Number.isSafeInteger(threshold) && threshold >= 1, 'VOTING 기준은 1 이상의 정수로 입력하세요.');
+          const nodeName = requirementModel.isPlaceholderName(node.name)
+            ? (node.type === 'event' ? { top: '최상위 이벤트', intermediate: '중간 이벤트', basic: '기본 이벤트' }[role] : `${node.type.toUpperCase()} 게이트`)
+            : node.name;
+          return { id: id(node.id), type: node.type, ...(node.type === 'event' ? { role, ...normalizeFaultTreeEvent(node) } : {}),
+            ...(node.type === 'voting' ? { threshold } : {}),
+            fill: color(node.fill ?? '#ffffff'), stroke: color(node.stroke ?? '#184867'), name: name(nodeName, '기호 이름'),
             x: coordinate(node.x), y: coordinate(node.y),
             source: node.source ? { modelId: id(node.source.modelId), nodeId: id(node.source.nodeId) } : null };
         })
       })),
       models
     };
+  }
+
+  function normalizeFaultTreeEvent(node) {
+    const probabilityModel = node.probabilityModel ?? 'exponential';
+    const exponentialMode = node.exponentialMode ?? 'non-repair';
+    assert(has(faultTreeProbabilityModels, probabilityModel), 'FTA 확률 모델을 확인하세요.');
+    assert(has(faultTreeExponentialModes, exponentialMode), 'FTA 지수분포 모드를 확인하세요.');
+    const values = {
+      probability: node.probability ?? 0,
+      derivedPercent: node.derivedPercent ?? 0,
+      failureRate: node.failureRate === null && node.source ? null : node.failureRate ?? 0.00001,
+      repairRate: node.repairRate ?? 0.1,
+      inspectionInterval: node.inspectionInterval ?? 340
+    };
+    for (const [key, max, label] of [
+      ['probability', 1, '확률은 0~1 범위로 입력하세요.'],
+      ['derivedPercent', 100, 'Safety mechanism 확률은 0~100% 범위로 입력하세요.'],
+      ['failureRate', Infinity, '고장률은 0 이상으로 입력하세요.'],
+      ['repairRate', Infinity, '수리율은 0 이상으로 입력하세요.'],
+      ['inspectionInterval', Infinity, '검사 주기는 0 이상으로 입력하세요.']
+    ]) {
+      const value = values[key];
+      if (key === 'failureRate' && value === null) continue;
+      assert(Number.isFinite(value) && value >= 0 && value <= max, label);
+    }
+    return { probabilityModel, exponentialMode, ...values };
+  }
+
+  function addFaultTreeSource(tree, model, original, x, y, targetId) {
+    if (original.type !== 'element' && original.type !== 'failure') return;
+    const target = tree.nodes.find(node => node.id === targetId);
+    if (target && !['or', 'and', 'voting'].includes(target.type)) return;
+
+    function append(type, name, x, y, parent, attributes = {}) {
+      while (tree.nodes.some(node => Math.abs(node.x - x) < 128 && Math.abs(node.y - y) < 128)) x += 168;
+      const node = { id: newId(), type, name, x, y, ...attributes };
+      tree.nodes.push(node);
+      if (parent) tree.connectors.push({ sourceId: node.id, targetId: parent.id });
+      return node;
+    }
+
+    function appendEvent(item, x, y, parent) {
+      const fit = item.type === 'failure' ? failureModeFit(model, item) : item.predictedFit;
+      return append('event', item.name, x, y, parent, {
+        source: { modelId: model.id, nodeId: item.id },
+        failureRate: fit == null ? null : fit * 1e-9
+      });
+    }
+
+    const event = appendEvent(original, target?.x ?? x, target ? target.y + 154 : y, target);
+    if (original.type === 'element') {
+      const modes = ownedFailureModes(model, original);
+      if (modes.length) {
+        const gate = append('or', 'OR 게이트', event.x, event.y + 154, event);
+        modes.forEach((mode, index) => appendEvent(mode, gate.x + index * 168, gate.y + 154, gate));
+      }
+    }
+    return event;
   }
 
   function arrangeFaultTree(tree) {
@@ -520,9 +651,11 @@ const SysmlModel = (() => {
   }
 
   return Object.freeze({
-    schemaVersion, limits, types, modelKinds, newId, createProject, normalizeProject,
+    schemaVersion, limits, types, modelKinds, faultTreeMissionTime, faultTreeProbabilityModels, faultTreeExponentialModes,
+    newId, createProject, normalizeProject, projectTitle, contentStamp,
     getModel, addModel, renameModel, removeModel, allowedTypes, addNode, moveNode, parentOptions, setParent,
-    connect, duplicateConnection, removeItem, arrange, arrangeFaultTree, createHistory
+    ownsFailureDistribution, ownedFailureModes, failureModeFit,
+    connect, duplicateConnection, removeItem, arrange, arrangeFaultTree, addFaultTreeSource, createHistory
   });
 })();
 

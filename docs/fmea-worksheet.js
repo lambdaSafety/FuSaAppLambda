@@ -5,7 +5,7 @@ const fmeaColumns = [
   ['s', 'S (심각도)'], ['o', 'O (발생도)'], ['d', 'D (검출도)'], ['ap', 'AP']
 ];
 
-function createFmeaWorksheet(userId) {
+function createFmeaWorksheet(userId, projectData) {
   const storageKey = 'weblambda.fmea.v1.' + userId;
   const panel = document.createElement('section');
   const add = document.createElement('button');
@@ -13,7 +13,7 @@ function createFmeaWorksheet(userId) {
   add.textContent = '행 추가';
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
-  status.textContent = '입력 내용은 이 브라우저에 계정별로 자동 저장됩니다.';
+  status.textContent = '입력 내용은 Supabase 저장 시 프로젝트와 함께 저장됩니다.';
   const viewport = document.createElement('div');
   viewport.className = 'fmea-scroll';
   const table = document.createElement('table');
@@ -35,22 +35,22 @@ function createFmeaWorksheet(userId) {
   let rows = [];
   let canSave = true;
   try {
-    const raw = localStorage.getItem(storageKey);
-    const stored = raw === null ? exampleRows() : JSON.parse(raw);
-    if (raw === null) status.textContent = '사용성 평가용 예시 2행입니다. 평가값은 직접 수정할 수 있습니다.';
+    const saved = projectData.read('fmea');
+    const legacy = saved === undefined ? localStorage.getItem(storageKey) : null;
+    const stored = saved ?? (legacy === null ? exampleRows() : JSON.parse(legacy));
+    if (saved === undefined && legacy === null) status.textContent = '사용성 평가용 예시 2행입니다. 평가값은 직접 수정할 수 있습니다.';
     if (!Array.isArray(stored) || stored.some(row => !row || typeof row !== 'object')) throw Error();
-    rows = stored;
+    rows = structuredClone(stored);
   } catch {
     canSave = false;
     status.textContent = '기존 데이터를 읽을 수 없습니다. 이 화면의 변경은 임시로만 유지됩니다.';
   }
   function save() {
     if (!canSave) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(rows));
-      status.textContent = '이 브라우저에 저장되었습니다.';
-    } catch {
-      status.textContent = '브라우저 저장 실패. 현재 입력은 화면에만 남아 있습니다.';
+    if (projectData.write('fmea', rows)) {
+      status.textContent = '프로젝트 초안에 반영됐습니다.';
+    } else {
+      status.textContent = '프로젝트 초안에 반영하지 못했습니다.';
     }
   }
   function appendRow(row) {

@@ -9,11 +9,12 @@ function createSysmlProjectStore(client, userId) {
 
   function content(project) {
     return { title: project.title, schemaVersion: project.schemaVersion,
-      activeModelId: project.activeModelId, models: project.models, diagrams: project.diagrams, requirements: project.requirements };
+      activeModelId: project.activeModelId, models: project.models, diagrams: project.diagrams, requirements: project.requirements,
+      workspaceData: project.workspaceData };
   }
 
   function sameContent(first, second) {
-    return JSON.stringify(content(first)) === JSON.stringify(content(second));
+    return SysmlModel.contentStamp(first) === SysmlModel.contentStamp(second);
   }
 
   function describeError(failure) {
@@ -35,7 +36,7 @@ function createSysmlProjectStore(client, userId) {
   }
 
   function summary(row) {
-    return { id: row.id, title: row.title, revision: row.revision, updatedAt: row.updated_at };
+    return { id: row.id, title: SysmlModel.projectTitle(row.title), revision: row.revision, updatedAt: row.updated_at };
   }
 
   function fromRow(row) {
@@ -217,7 +218,7 @@ function createSysmlProjectStore(client, userId) {
       p_title: snapshot.title,
       p_schema_version: snapshot.schemaVersion,
       p_payload: { activeModelId: snapshot.activeModelId, models: snapshot.models, diagrams: snapshot.diagrams,
-        requirements: snapshot.requirements }
+        requirements: snapshot.requirements, workspaceData: snapshot.workspaceData }
     }).single()));
     pendingDrafts(saved, drafts(saved.id));
     writeLocal(lastProjectKey, saved.id);
@@ -237,6 +238,19 @@ function createSysmlProjectStore(client, userId) {
     return SysmlModel.normalizeProject({ ...data.project, id: SysmlModel.newId(), revision: 0 });
   }
 
+  function legacyWorkspaceData() {
+    const raw = {
+      fmea: readLocal('weblambda.fmea.v1.' + userId),
+      mission: readLocal('weblambda.mission.v1.' + userId)
+    };
+    try {
+      raw.rateUnit = localStorage.getItem('weblambda.rate-unit.' + userId);
+    } catch {
+      // Legacy settings may be unavailable when browser storage is blocked.
+    }
+    return raw;
+  }
+
   function exportFile(project) {
     const snapshot = SysmlModel.normalizeProject(project);
     const file = new Blob([JSON.stringify({ format: fileFormat, project: content(snapshot) }, null, 2)], {
@@ -254,7 +268,7 @@ function createSysmlProjectStore(client, userId) {
   }
 
   return {
-    create: (title) => SysmlModel.createProject(title), open, restore, save, list, listDrafts,
+    create: (title) => SysmlModel.createProject(title), open, restore, save, list, listDrafts, legacyWorkspaceData,
     importFile, exportFile, setLastProject, writeDraft, getDraft, clearDraft
   };
 }

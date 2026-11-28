@@ -22,4 +22,14 @@
 .fta-node text:not(.fta-inner-label) { transform:translateY(-12px); font-size:9px; }
 .fta-inline-name { position:absolute; width:96px; box-sizing:border-box; text-align:center; }
 .fta-role label { display:grid; gap:3px; }
-.fta-role input { min-width:0; width:100%; }
+.fta-role input, .fta-role select { min-width:0; width:100%; }
+.fta-mission { white-space:nowrap; }
+.fta-cutsets { overflow-x:auto; }
+.fta-cutsets table { width:100%; border-collapse:collapse; margin-bottom:12px; }
+.fta-cutsets caption { text-align:left; font-weight:600; padding:6px 0; }
+.fta-cutsets th, .fta-cutsets td { border:1px solid #cbd5df; padding:6px 10px; text-align:left; }
+.fta-cutsets th { background:#edf4f8; }
+.fta-cutsets td:first-child, .fta-cutsets td:last-child { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.fta-evaluation-status { white-space:pre-line; }
+.fta-evaluation-status:not(:empty) { margin:8px 0; }
+.fta-node-result { position:absolute; transform:translateX(-50%); pointer-events:none; white-space:nowrap; text-align:center; font:11px/1.25 sans-serif; color:#184867; background:#fff; padding:1px 3px; }

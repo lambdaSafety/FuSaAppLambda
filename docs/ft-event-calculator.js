@@ -6,7 +6,7 @@ function createFtEventCalculator() {
       explanation: '기본 이벤트 중 하나 이상이 고장 상태일 때 최상위 이벤트(TLE)가 발생합니다. E₁이 발생하면 TLE가 확정되고, E₁이 발생하지 않으면 TLE는 E₂와 같습니다.',
       equations: [
         String.raw`Q_{\mathrm{OR}}(t) = Q_1(t) + S_1(t)Q_2(t)`,
-        String.raw`\omega_{\mathrm{OR}}(t) = \omega_1(t)S_2(t) + S_1(t)\omega_2(t)`
+        String.raw`f_{\mathrm{OR}}(t) = \omega_1(t)S_2(t) + S_1(t)\omega_2(t) = (\lambda_1+\lambda_2)e^{-(\lambda_1+\lambda_2)t}`
       ]
     },
     {
@@ -15,7 +15,7 @@ function createFtEventCalculator() {
       explanation: '두 기본 이벤트가 모두 고장 상태일 때 최상위 이벤트(TLE)가 발생합니다. E₁이 발생하면 TLE는 E₂와 같고, E₁이 발생하지 않으면 TLE도 발생하지 않습니다.',
       equations: [
         String.raw`Q_{\mathrm{AND}}(t) = Q_1(t)Q_2(t)`,
-        String.raw`\omega_{\mathrm{AND}}(t) = \omega_1(t)Q_2(t) + Q_1(t)\omega_2(t)`
+        String.raw`f_{\mathrm{AND}}(t) = \omega_1(t)Q_2(t) + Q_1(t)\omega_2(t)`
       ]
     }
   ];
@@ -43,7 +43,7 @@ function createFtEventCalculator() {
           <div class="expo-formula"></div>
           <dl class="expo-values">
             <div><dt>발생 확률 Q(t)</dt><dd data-value="probability"></dd></div>
-            <div><dt>순간 고장 빈도 ω(t) (1/h)</dt><dd data-value="frequency"></dd></div>
+            <div><dt>순간 고장 빈도 f(t) (1/h)</dt><dd data-value="frequency"></dd></div>
           </dl>
           <div class="expo-chart"></div>
         </section>
@@ -87,7 +87,7 @@ function createFtEventCalculator() {
     String.raw`\begin{aligned}
       Q_i(t) &= 1 - e^{-\lambda_i t}\\
       S_i(t) &= 1 - Q_i(t) = e^{-\lambda_i t}\\
-      \omega_i(t) &= \lambda_i S_i(t)
+      f_i(t) &= \omega_i(t) = \lambda_i S_i(t) = \lambda_i e^{-\lambda_i t}
     \end{aligned}`
   ]);
   addEquations(panel.querySelector('.ft-conditional-equations'), [

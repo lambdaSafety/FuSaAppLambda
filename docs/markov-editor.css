@@ -1,0 +1,47 @@
+.markov-editor,
+.markov-content,
+.markov-results {
+  display: grid;
+  gap: .8rem;
+  min-width: 0;
+}
+
+.markov-fields,
+.markov-component,
+.markov-metrics {
+  display: grid;
+  gap: .6rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+}
+
+.markov-component {
+  align-items: end;
+  padding: .5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.markov-component strong { overflow-wrap: anywhere; }
+.markov-panel { padding: .75rem; border: 1px solid var(--line); border-radius: .5rem; }
+.markov-panel > summary { cursor: pointer; font-weight: 700; margin-bottom: .55rem; }
+.markov-panel > p { margin: .55rem 0 0; color: var(--muted); }
+.markov-panel > .markov-fields { margin-block: .65rem; }
+.markov-inspector { display: grid; gap: .55rem; align-content: start; }
+.markov-inspector h3 { margin: 0; }
+.markov-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem); gap: .75rem; align-items: start; }
+.markov-canvas { height: clamp(25rem, 62vh, 55rem); border: 1px solid var(--line); border-radius: .5rem; }
+.markov-canvas .sysml-canvas-card { display: flex; align-items: center; padding-inline: .7rem; }
+.markov-editor [type="checkbox"] { justify-self: start; }
+.markov-results:empty { display: none; }
+.markov-results h2, .markov-results p, .markov-metrics { margin: 0; }
+.markov-metrics > div { border: 1px solid var(--line); border-radius: .4rem; padding: .55rem; }
+.markov-metrics dt { color: var(--muted); font-size: .78rem; }
+.markov-metrics dd { margin: .25rem 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.markov-results svg { max-width: 100%; height: auto; }
+.markov-table-scroll { overflow: auto; }
+.markov-table { border-collapse: collapse; width: 100%; }
+.markov-table :is(th, td) { padding: .4rem; border-bottom: 1px solid var(--line); text-align: left; }
+
+@media (max-width: 62rem) {
+  .markov-grid { grid-template-columns: minmax(0, 1fr); }
+}
+

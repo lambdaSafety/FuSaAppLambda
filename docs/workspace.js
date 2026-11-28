@@ -81,7 +81,7 @@ const workspaceMenu = [
         ]
       },
       { id: 'dfa', title: '종속고장', description: '공통 원인과 연쇄 고장이 영향을 주는 요소와 독립성 가정을 검토합니다.', links: ['requirements', 'safety-fta'] },
-      { id: 'safety-markov', title: '마코프 분석', description: '시스템의 정상·고장 상태와 상태 사이의 전이를 모델링합니다.' }
+      { id: 'safety-markov', title: '마코프 분석', createContent: createMarkovEditor, description: 'IEC 61165의 상태 전이도로 신뢰도, 가용도, 정비도와 안전 지표를 계산합니다.' }
     ]
   },
   {
@@ -176,7 +176,7 @@ const workspaceMenu = [
       { id: 'q-over-t', title: 'Q/T' },
       { id: 'cut-set-importance', title: 'Cut Set, Importance' },
       { id: 'rbd', title: 'RBD' },
-      { id: 'markov-analysis', title: '마코프 분석' }
+      { id: 'markov-analysis', title: '마코프 분석', createContent: createMarkovEditor }
     ]
   },
   { title: '설정 및 도움', icon: 'settings', children: [
@@ -219,6 +219,7 @@ function createWorkspace(root) {
   let activeId = null;
   let currentWorkspaceUser = null;
   const moduleContent = new Map();
+  const projectPages = new Set(['fmea', 'mission-profile', 'failure-rate-unit', 'safety-markov', 'markov-analysis']);
   const sysmlWorkspace = createSysmlWorkspace({ navigate, mount: root, activeModule: () => activeId });
 
   function element(tag, text, className) {
@@ -293,7 +294,7 @@ function createWorkspace(root) {
     activeId = moduleId;
     module.button?.setAttribute('aria-current', 'page');
     for (const { group } of module.ancestors) group.open = true;
-    if (moduleId === 'safety-fta') {
+    if (['safety-fta', 'safety-markov', 'markov-analysis'].includes(moduleId)) {
       for (const { group } of modules.get('sysml').ancestors) group.open = true;
     }
     const breadcrumbs = module.ancestors.map(ancestor => ancestor.title);
@@ -303,7 +304,7 @@ function createWorkspace(root) {
     description.textContent = module.description;
     description.hidden = !module.description;
     document.title = module.title + ' | 안전분석 공업 수학';
-    root.classList.toggle('workspace-sysml', ['sysml', 'requirements'].includes(moduleId));
+    root.classList.toggle('workspace-sysml', ['sysml', 'requirements', 'safety-markov', 'markov-analysis'].includes(moduleId));
 
     content.replaceChildren();
     if (moduleId === 'projects' || moduleId === 'sysml') {
@@ -312,8 +313,17 @@ function createWorkspace(root) {
       content.append(sysmlWorkspace.fta.element);
     } else if (moduleId === 'requirements') {
       content.append(sysmlWorkspace.req.element);
+    } else if (projectPages.has(moduleId)) {
+      const projectData = sysmlWorkspace.projectData();
+      if (projectData) {
+        const page = module.createContent(currentWorkspaceUser, projectData);
+        content.append(page);
+        page.refreshRate?.();
+      } else {
+        content.append(element('p', '프로젝트를 먼저 열거나 만드세요.'), moduleButton(modules.get('projects')));
+      }
     } else if (module.createContent) {
-      if (!moduleContent.has(moduleId)) moduleContent.set(moduleId, ['fmea', 'mission-profile', 'failure-rate-unit'].includes(moduleId) ? module.createContent(currentWorkspaceUser) : module.createContent());
+      if (!moduleContent.has(moduleId)) moduleContent.set(moduleId, module.createContent());
       const page = moduleContent.get(moduleId);
       content.append(page);
       page.refreshRate?.();
@@ -342,11 +352,13 @@ function createWorkspace(root) {
   }
 
   function navigate(moduleId) {
+    if (activeId === 'requirements' && moduleId !== activeId && !sysmlWorkspace.req.flushPending()) return;
     if (moduleId !== activeId) history.push(activeId);
     render(moduleId);
   }
 
   function goBack() {
+    if (activeId === 'requirements' && !sysmlWorkspace.req.flushPending()) return;
     if (history.length > 0) render(history.pop());
   }
 

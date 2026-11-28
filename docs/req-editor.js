@@ -1,4 +1,4 @@
-function createReqWorkspace({ project, edit, requestModel, renameModel, navigate }) {
+function createReqWorkspace({ project, edit, requestModel, renameModel, removeModel, navigate }) {
   const { kinds, domains, statuses, linkTypes } = ReqModel;
   const linkLabels = {
     TRACE: 'TRACE · 추적성',
@@ -30,6 +30,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
   let navStamp = '';
   let lastData;
   let lastSwitching;
+  const pendingForms = [];
   const canvas = createSysmlCanvas({
     nodeTypes: Object.fromEntries(Object.entries(kinds).map(([kind, label]) => [kind, { label }])),
     emptyMessage: '팔레트에서 항목을 추가하거나 기존 항목을 배치하세요.',
@@ -70,7 +71,31 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     notice.hidden = !text;
   }
 
+  function registerForm(form, applyChanges) {
+    const snapshot = () => JSON.stringify([...form.elements].map(field =>
+      field.type === 'checkbox' ? field.checked : field.value));
+    const original = snapshot();
+    pendingForms.push({ changed: () => snapshot() !== original, form, applyChanges });
+  }
+
+  function hasPending() {
+    return pendingForms.some(entry => entry.changed());
+  }
+
+  function flushPending() {
+    const changes = pendingForms.filter(entry => entry.changed());
+    if (!changes.length) return true;
+    if (changes.some(({ form }) => !form.reportValidity())) return false;
+    const applied = edit(draft => {
+      for (const { applyChanges } of changes) applyChanges(draft.requirements);
+      return true;
+    }) === true;
+    if (applied && hasPending()) draw();
+    return applied;
+  }
+
   function activate(id) {
+    if (!flushPending()) return;
     if (modelId !== id) {
       modelId = id;
       activeDiagramId = null;
@@ -85,6 +110,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
   }
 
   function change(update) {
+    if (!flushPending()) return undefined;
     return edit(draft => {
       const target = draft.requirements.models.find(item => item.id === modelId);
       return update(draft.requirements, target, target?.diagrams.find(item => item.id === diagram()?.id));
@@ -125,6 +151,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
   }
 
   function select(id) {
+    if (!flushPending()) return;
     if (linking && id) {
       if (sourceId) return commitLink(sourceId, id, relation);
       sourceId = id;
@@ -136,6 +163,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
   }
 
   function selectTree(id) {
+    if (!flushPending()) return;
     if (linking) return select(id);
     const item = entity(id);
     if (!item) return;
@@ -191,9 +219,13 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
       const header = el('div', 'sysml-nav-model');
       const modelButton = button(current.title, () => activate(current.id), { icon: 'model' });
       if (modelId === current.id) modelButton.setAttribute('aria-current', 'true');
-      modelButton.addEventListener('contextmenu', event => {
+      const editModelName = event => {
         event.preventDefault();
         renameModel(current);
+      };
+      modelButton.addEventListener('contextmenu', editModelName);
+      modelButton.addEventListener('keydown', event => {
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) editModelName(event);
       });
       const toggle = button(current.title, () => {
         openModels.set(current.id, tree.hidden);
@@ -338,20 +370,18 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     const save = el('button', 'sysml-primary', '속성 적용');
     save.type = 'submit';
     form.append(save);
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      try {
-        const attributes = JSON.parse(custom.value);
-        if (!attributes || Array.isArray(attributes) || typeof attributes !== 'object') throw new Error('확장 속성은 JSON 객체로 입력하세요.');
-        for (const [key, input] of domainValues) {
-          if (input.value !== (item.attributes[key] ?? '')) attributes[key] = input.value;
-        }
-        change(store => ReqModel.update(store, item.id, {
-          title: title.value.trim(), description: description.value, status: status.value,
-          domain: domain.value, attributes, undeveloped: undeveloped.checked
-        }));
-      } catch (error) { setNotice(error.message); }
+    registerForm(form, store => {
+      const attributes = JSON.parse(custom.value);
+      if (!attributes || Array.isArray(attributes) || typeof attributes !== 'object') throw new Error('확장 속성은 JSON 객체로 입력하세요.');
+      for (const [key, input] of domainValues) {
+        if (input.value !== (item.attributes[key] ?? '')) attributes[key] = input.value;
+      }
+      ReqModel.update(store, item.id, {
+        title: title.value.trim(), description: description.value, status: status.value,
+        domain: domain.value, attributes, undeveloped: undeveloped.checked
+      });
     });
+    form.addEventListener('submit', event => { event.preventDefault(); flushPending(); });
     inspector.append(form);
     if (allowedKinds().includes(item.kind)) {
       const placed = diagram().layout.some(box => box.entityId === item.id);
@@ -393,14 +423,12 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     apply.type = 'submit';
     apply.disabled = !rows.length;
     form.append(table, apply);
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      change(store => {
-        for (const row of rows) ReqModel.update(store, row.item.id, {
-          title: row.title.value.trim(), description: row.description.value, status: row.status.value, domain: row.domain.value
-        });
+    registerForm(form, store => {
+      for (const row of rows) ReqModel.update(store, row.item.id, {
+        title: row.title.value.trim(), description: row.description.value, status: row.status.value, domain: row.domain.value
       });
     });
+    form.addEventListener('submit', event => { event.preventDefault(); flushPending(); });
     return form;
   }
 
@@ -435,6 +463,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
   }
 
   function draw() {
+    pendingForms.length = 0;
     renderNav();
     body.replaceChildren();
     setNotice('');
@@ -447,7 +476,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     const toolbar = el('div', 'sysml-actions req-toolbar');
     toolbar.append(el('h2', '', model().title), button('이름 편집', () => renameModel(model())));
     for (const [key, label] of [['diagram', '다이어그램'], ['table', '테이블'], ['report', '검증 보고서']]) {
-      const control = button(label, () => { view = key; linking = false; sourceId = null; draw(); });
+      const control = button(label, () => { if (flushPending()) { view = key; linking = false; sourceId = null; draw(); } });
       control.setAttribute('aria-pressed', String(view === key));
       toolbar.append(control);
     }
@@ -459,15 +488,9 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
-    const removeModel = button('모델 삭제', () => {
-      if (!window.confirm(`‘${model().title}’ 모델과 소유 항목을 삭제할까요?`)) return;
-      change((store, target) => {
-        ReqModel.remove(store, new Set(store.entities.filter(item => item.modelId === target.id).map(item => item.id)));
-        store.models = store.models.filter(item => item.id !== target.id);
-      });
-    }, { className: 'sysml-delete' });
+    const deleteButton = button('모델 삭제', () => removeModel(model().id), { className: 'sysml-delete' });
     download.disabled = modelEntities().length === 0;
-    toolbar.append(download, ...importControls(), removeModel);
+    toolbar.append(download, ...importControls(), deleteButton);
     body.append(toolbar);
     if (view !== 'diagram') {
       body.append(view === 'table' ? renderTable() : renderReport());
@@ -477,12 +500,14 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     const diagrams = el('div', 'sysml-actions');
     const choice = selectControl(model().diagrams.map(layout => [layout.id, layout.title]), diagram().id, '다이어그램');
     choice.addEventListener('change', () => {
+      if (!flushPending()) { choice.value = diagram().id; return; }
       activeDiagramId = choice.value;
       linking = false;
       sourceId = null;
       draw();
     });
     function addDiagram(type, label) {
+      if (!flushPending()) return;
       const name = window.prompt('다이어그램 이름', label);
       if (!name?.trim()) return;
       const added = change((store, target) => ReqModel.addDiagram(target, name, type));
@@ -517,7 +542,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
     paint();
   }
 
-  return { element, navigation, activate, render(current, switching, active) {
+  return { element, navigation, activate, hasPending, flushPending, render(current, switching, active) {
     addModelLink.disabled = switching;
     if (current?.id !== projectId) {
       projectId = current?.id;
@@ -528,6 +553,7 @@ function createReqWorkspace({ project, edit, requestModel, renameModel, navigate
       linking = false;
       sourceId = null;
       openModels.clear();
+      pendingForms.length = 0;
       navStamp = '';
     }
     if (!model()) {

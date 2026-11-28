@@ -1,5 +1,15 @@
 function createSysmlWorkspace({ navigate, mount, activeModule }) {
   const { limits, modelKinds } = SysmlModel;
+  const saveButton = mount.querySelector('#save-project');
+  const saveStatus = mount.querySelector('#project-save-status');
+  let focusedInput = null;
+  mount.addEventListener('focusin', event => {
+    const control = event.target;
+    focusedInput = control.matches?.('.sysml-editor :is(input, textarea), .mission-editor input, .markov-editor :is(input, textarea)')
+      ? { control, value: control.value }
+      : null;
+  });
+  saveButton.addEventListener('click', () => void save());
   const navigation = sysmlElement('div', 'sysml-navigation');
   const modelLinks = sysmlElement('div', 'sysml-model-links');
   modelLinks.setAttribute('aria-label', 'SysML 모델');
@@ -46,9 +56,9 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     for (const button of modelLinks.querySelectorAll('[data-item-id]')) {
       button.setAttribute('aria-pressed', String(button.closest('[data-model-id]').dataset.modelId === model()?.id && button.dataset.itemId === editor.selectedId()));
     }
-  }, renameModel: () => showModelDialog(model()), removeModel });
-  const fta = createFaultTreeEditor({ project, edit, navigate });
-  const req = createReqWorkspace({ project, edit, navigate, renameModel: showReqModelDialog,
+  }, renameModel: () => showModelDialog(model()), removeModel: () => removeModel() });
+  const fta = createFaultTreeEditor({ project, edit, navigate, showModelDialog: showFtaModelDialog });
+  const req = createReqWorkspace({ project, edit, navigate, renameModel: showReqModelDialog, removeModel: removeReqModel,
     requestModel() {
       if (project()) showReqModelDialog();
       else showProjectDialog(showReqModelDialog);
@@ -71,11 +81,9 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     status.setAttribute('role', 'status');
     identity.append(title, status);
     const actions = sysmlElement('div', 'sysml-actions');
-    const saveButton = sysmlButton('Supabase 저장', () => void save(), { className: 'sysml-primary' });
-    saveButton.title = '프로젝트 저장 (Ctrl+S)';
     const json = sysmlButton('JSON 저장', () => exportProject());
     const conflict = sysmlButton('충돌 초안 JSON 저장', () => exportProject(conflictDraft));
-    actions.append(saveButton, json, conflict);
+    actions.append(json, conflict);
     let undoButton;
     let redoButton;
     if (isProjectPage) {
@@ -92,7 +100,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       actions.append(sysmlButton('프로젝트 열기', () => navigate('projects')));
     }
     element.append(identity, actions);
-    return { element, title, status, saveButton, json, conflict, undoButton, redoButton };
+    return { element, title, status, json, conflict, undoButton, redoButton };
   }
 
   function project() {
@@ -103,12 +111,8 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     return projectValue ? SysmlModel.getModel(projectValue) : null;
   }
 
-  function stamp(value) {
-    return JSON.stringify([value.title, value.activeModelId, value.models, value.diagrams, value.requirements]);
-  }
-
   function dirty() {
-    return Boolean(project() && stamp(project()) !== remoteStamp);
+    return Boolean(project() && SysmlModel.contentStamp(project()) !== remoteStamp);
   }
 
   function writeDraft() {
@@ -128,18 +132,23 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   function beforeReplacingProject() {
     if (switching || pendingSave) return false;
     if (!history) return true;
+    if (!req.flushPending()) return false;
     captureView();
     writeDraft();
-    return !dirty() || draftAvailable || window.confirm('이 브라우저에 초안을 보관할 수 없습니다. 다른 프로젝트를 열까요?');
+    return !dirty() || window.confirm(draftAvailable
+      ? 'Supabase에 저장하지 않은 변경이 있습니다. 초안을 이 브라우저에 두고 다른 프로젝트로 이동할까요?'
+      : '저장하지 않은 변경의 초안을 보관할 수 없습니다. 다른 프로젝트로 이동할까요?');
   }
 
   function openInWorkspace(nextProject, showProject = true) {
-    history = SysmlModel.createHistory(nextProject);
-    remoteStamp = nextProject.isDraft || nextProject.revision === 0 ? '' : stamp(project());
+    const remote = SysmlModel.normalizeProject(nextProject);
+    const workspaceData = { ...store.legacyWorkspaceData(), ...remote.workspaceData };
+    history = SysmlModel.createHistory({ ...remote, workspaceData });
+    remoteStamp = nextProject.isDraft || nextProject.revision === 0 ? '' : SysmlModel.contentStamp(remote);
     draftAvailable = true;
     conflictDraft = nextProject.conflictDraft ?? null;
     statusMessage = nextProject.storageError ?? (conflictDraft ? '서버에 더 최신 버전이 있습니다. 이전 초안을 JSON 파일로 저장할 수 있습니다.' : '');
-    if (nextProject.revision === 0) writeDraft();
+    if (dirty()) writeDraft();
     if (showProject) navigate(model() ? 'sysml' : 'projects');
     render();
   }
@@ -226,6 +235,8 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   function save() {
     if (pendingSave) return pendingSave;
     if (!project() || !store || switching) return Promise.resolve(false);
+    if (document.activeElement?.matches('input, textarea, select, [contenteditable]')) document.activeElement.blur();
+    if (!req.flushPending()) return Promise.resolve(false);
     captureView();
     writeDraft();
     const snapshot = structuredClone(project());
@@ -236,14 +247,15 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     return pendingSave;
 
     async function saveSnapshot() {
+      let confirmed = false;
       try {
         const saved = await currentStore.save(snapshot);
         if (store !== currentStore || project()?.id !== saved.id) return false;
         project().revision = saved.revision;
-        remoteStamp = stamp(saved);
+        remoteStamp = SysmlModel.contentStamp(saved);
         const updated = { id: saved.id, title: saved.title, revision: saved.revision, updatedAt: saved.updatedAt };
         records = [updated, ...records.filter((item) => item.id !== saved.id)];
-        if (dirty()) writeDraft();
+        confirmed = true;
         return true;
       } catch (error) {
         if (store === currentStore) {
@@ -254,13 +266,14 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       } finally {
         if (store === currentStore) {
           pendingSave = null;
+          if (confirmed) writeDraft();
           render();
         }
       }
     }
   }
 
-  function openDialog(title, initialName, kind, onApply, modelToDerive = null) {
+  function openDialog(title, initialName, kind, onApply, { derive = false, onDelete } = {}) {
     if (!store || switching || dialog.open) return;
     focusBeforeDialog = document.activeElement;
     dialogAction = onApply;
@@ -291,10 +304,13 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       form.append(typeLabel);
     }
     const controls = sysmlElement('div', 'sysml-actions');
-    const apply = sysmlElement('button', 'sysml-primary', initialName ? '적용' : '만들기');
+    const apply = sysmlElement('button', 'sysml-primary', onDelete ? '적용' : '만들기');
     apply.type = 'submit';
     controls.append(sysmlButton('취소', () => dialog.close()), apply);
-    if (modelToDerive) {
+    if (onDelete) controls.prepend(sysmlButton('모델 삭제', () => {
+      if (onDelete()) dialog.close();
+    }, { className: 'sysml-delete' }));
+    if (derive) {
       const status = sysmlElement('p');
       status.hidden = true;
       status.setAttribute('role', 'status');
@@ -339,16 +355,16 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   }
 
   function showModelDialog(existing = null) {
-    openDialog(existing ? 'SysML 모델 편집' : 'SysML 모델 추가', existing?.name ?? '', existing?.kind ?? 'system', (name, kind) => {
+    openDialog(existing ? 'SysML 모델 편집' : 'SysML 모델 추가', existing?.name ?? 'New SysML 모델', existing?.kind ?? 'system', (name, kind) => {
       captureView();
       if (existing) edit((draft) => SysmlModel.renameModel(SysmlModel.getModel(draft, existing.id), name, kind));
       else edit((draft) => SysmlModel.addModel(draft, name, kind));
       navigate('sysml');
-    }, existing);
+    }, existing ? { derive: true, onDelete: () => removeModel(existing.id) } : undefined);
   }
 
   function showReqModelDialog(existing = null) {
-    openDialog(existing ? 'Req 모델 편집' : 'Req 모델 추가', existing?.title ?? '', null, name => {
+    openDialog(existing ? 'Req 모델 편집' : 'Req 모델 추가', existing?.title ?? 'New Req 모델', null, name => {
       const id = edit(draft => {
         if (!existing) return ReqModel.addModel(draft.requirements, name).id;
         const target = draft.requirements.models.find(item => item.id === existing.id);
@@ -356,13 +372,39 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
         return target.id;
       });
       if (id) req.activate(id);
-    });
+    }, existing ? { onDelete: () => removeReqModel(existing.id) } : undefined);
   }
 
-  function removeModel() {
-    const current = model();
-    if (!current || !window.confirm(`‘${current.name}’ 모델과 다이어그램을 삭제할까요?`)) return;
-    edit((draft) => SysmlModel.removeModel(draft, current.id));
+  function showFtaModelDialog(existing) {
+    openDialog('FTA 모델 편집', existing.name, null, name => {
+      edit(draft => { draft.diagrams.find(item => item.id === existing.id).name = name; });
+    }, { onDelete: () => {
+      if (!window.confirm(`‘${existing.name}’ FTA 모델과 소유 기호를 삭제할까요?`)) return false;
+      return edit(draft => {
+        draft.diagrams = draft.diagrams.filter(item => item.id !== existing.id);
+        return true;
+      }) === true;
+    } });
+  }
+
+  function removeModel(id = model()?.id) {
+    const target = project()?.models.find(item => item.id === id);
+    if (switching || !target || !window.confirm(`‘${target.name}’ 모델과 다이어그램을 삭제할까요?`)) return false;
+    return edit(draft => {
+      SysmlModel.removeModel(draft, id);
+      return true;
+    }) === true;
+  }
+
+  function removeReqModel(id) {
+    const target = project()?.requirements.models.find(item => item.id === id);
+    if (switching || !target || !window.confirm(`‘${target.title}’ 모델과 소유 항목을 삭제할까요?`)) return false;
+    return edit(draft => {
+      const data = draft.requirements;
+      ReqModel.remove(data, new Set(data.entities.filter(item => item.modelId === id).map(item => item.id)));
+      data.models = data.models.filter(item => item.id !== id);
+      return true;
+    }) === true;
   }
 
   function activateModel(id) {
@@ -419,10 +461,15 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       bar.title.textContent = current?.title ?? '프로젝트';
       bar.status.textContent = status;
       bar.status.classList.toggle('sysml-status-error', Boolean(statusMessage && !pendingSave && !switching));
-      bar.saveButton.disabled = !current || switching || Boolean(pendingSave);
+
       bar.json.disabled = !current;
       bar.conflict.hidden = !conflictDraft;
     }
+    saveButton.disabled = !current || switching || Boolean(pendingSave);
+    saveButton.textContent = pendingSave ? '저장 중…' : 'Supabase 저장';
+    saveStatus.textContent = statusMessage || (pendingSave ? '저장 중…' : current && (dirty() ? '미저장' : '저장 완료'));
+    saveStatus.hidden = !saveStatus.textContent;
+    saveButton.title = status ? `전체 프로젝트 저장 (Ctrl+S) · ${status}` : '전체 프로젝트 저장 (Ctrl+S)';
     editorBar.undoButton.disabled = switching || !history?.canUndo;
     editorBar.redoButton.disabled = switching || !history?.canRedo;
     newModelLink.disabled = switching || !store;
@@ -448,10 +495,13 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
         const button = sysmlButton(item.name, () => activateModel(item.id), { icon: 'model' });
         button.title = `${item.name} · ${modelKinds[item.kind]}`;
         if (item.id === current.activeModelId && currentModule === 'sysml') button.setAttribute('aria-current', 'true');
-        button.addEventListener('contextmenu', (event) => {
+        const editModelName = event => {
           event.preventDefault();
-          activateModel(item.id);
           showModelDialog(item);
+        };
+        button.addEventListener('contextmenu', editModelName);
+        button.addEventListener('keydown', event => {
+          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) editModelName(event);
         });
         const branch = sysmlElement('div', 'sysml-nav-branch');
         branch.dataset.modelId = item.id;
@@ -531,13 +581,27 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
   }
 
   window.addEventListener('beforeunload', (event) => {
-    if (!dirty() && !pendingSave) return;
+    const typing = focusedInput?.control === document.activeElement && focusedInput.value !== focusedInput.control.value;
+    if (!dirty() && !pendingSave && !req.hasPending() && !typing) return;
     event.preventDefault();
     event.returnValue = '';
   });
 
   return {
     navigation, projects, sysml, start, fta, req,
+    projectData() {
+      const id = project()?.id;
+      if (!id) return null;
+      return {
+        systemElement(modelId, nodeId, projectId = id) {
+          if (project()?.id !== id || projectId !== id) return null;
+          return SysmlModel.getModel(project(), modelId)?.nodes.find(node => node.id === nodeId && node.type === 'element');
+        },
+        read: key => project()?.id === id ? project().workspaceData[key] : undefined,
+        write: (key, value) => project()?.id === id &&
+          edit(draft => { draft.workspaceData[key] = structuredClone(value); return true; })
+      };
+    },
     render(active, entering) {
       render();
       if (entering && active === 'sysml' && model()) editor.restoreView();
@@ -565,8 +629,10 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
     },
     async beforeLogout() {
       if (pendingSave) await pendingSave;
+      const applied = req.flushPending();
       captureView();
       writeDraft();
+      if (!applied) return window.confirm('적용하지 못한 요구사항 입력이 있습니다. 로그아웃할까요?');
       if (!dirty()) return true;
       if (draftAvailable) return window.confirm('Supabase에 저장하지 않은 변경이 이 브라우저의 초안에 있습니다. 로그아웃할까요?');
       return window.confirm('Supabase에 저장하지 않은 변경이 있습니다. 로그아웃할까요?');
@@ -575,7 +641,7 @@ function createSysmlWorkspace({ navigate, mount, activeModule }) {
       const key = event.key.toLowerCase();
       const command = (event.ctrlKey || event.metaKey) && !event.altKey;
       if (dialog.open) return false;
-      if (command && key === 's' && project() && ['projects', 'sysml', 'safety-fta', 'requirements'].includes(activeModule())) {
+      if (command && key === 's' && project()) {
         if (event.target.matches?.('input, textarea')) event.target.blur();
         void save();
         return true;
